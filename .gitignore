@@ -1,0 +1,27 @@
+# Build output
+Debug/
+Release/
+build/
+
+# IDE files (STM32CubeIDE)
+.settings/
+.cproject
+.project
+
+# Keil MDK
+*.uvguix.*
+*.uvoptx
+*.uvgui
+Listings/
+Objects/
+
+# Binary files
+*.elf
+*.bin
+*.hex
+*.map
+*.d
+*.o
+
+# Backup files
+*.bak
