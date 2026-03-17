@@ -1,4 +1,5 @@
 #include "input.h"
+#include <stdlib.h>
 #include <string.h>
 
 monitor_event_t monitors_event[EVENTS_HISTORY_MAX];
@@ -7,8 +8,6 @@ uint16_t input_queue[INPUT_QUEUE_SIZE];
 int queue_head = 0;
 int queue_tail = 0;
 int queue_count = 0;
-
-input_state_t input_state[16];
 
 int events_index = 0;
 int events_count = 0;
@@ -74,7 +73,7 @@ static PinAnalysis analyze_pin(uint8_t n_samples, uint8_t pin) {
     return a;
 }
 
-static json_monitor_state_t infer_from_analysis(MonitorType type, const PinAnalysis *a) {
+static json_monitor_state_t infer_from_analysis(MonitorType type, PinAnalysis *a) {
     /* tín hiệu tĩnh */
     if (a->transitions == 0) {
         return (a->duty_cycle >= 0.99f) ? ON : OFF;
@@ -82,15 +81,42 @@ static json_monitor_state_t infer_from_analysis(MonitorType type, const PinAnaly
 
     /* so khớp a->freq_hz với các mức BLINK_* */
     float freq = a->freq_hz;
-    if (freq >= 7.5f && freq <= 8.5f) return BLINK_8HZ;
-    if (freq >= 4.5f && freq <= 5.5f) return BLINK_5HZ;
-    if (freq >= 3.5f && freq <= 4.5f) return BLINK_4HZ;
-    if (freq >= 1.5f && freq <= 2.5f) return BLINK_2HZ;
-    if (freq >= 0.5f && freq <= 1.5f) return BLINK_1HZ;
-    if (freq >= 0.2f && freq <= 0.3f) return BLINK_0_25HZ;
-    if (freq >= 0.016f && freq <= 0.017f) return BLINK_1_PER_MIN;  // ~1/60 Hz
-    if (freq >= 0.032f && freq <= 0.035f) return BLINK_2_PER_MIN;  // ~2/60 Hz
-    if (freq >= 0.048f && freq <= 0.052f) return BLINK_3_PER_MIN;  // ~3/60 Hz
+    if (freq >= 6.0f && freq <= 10.0f) {
+        a->confident = abs(freq - 8.0f)/2.0f;
+        return BLINK_8HZ;
+    }
+    if (freq >= 4.5f && freq <= 5.5f) {
+        a->confident = abs(freq - 5.0f)/0.5f;
+        return BLINK_5HZ;
+    }
+    if (freq >= 3.5f && freq <= 4.5f) {
+        a->confident = abs(freq - 4.0f)/0.5f;
+        return BLINK_4HZ;
+    }
+    if (freq >= 1.5f && freq <= 2.5f) {
+        a->confident = abs(freq - 2.0f)/0.5f;
+        return BLINK_2HZ;
+    }
+    if (freq >= 0.5f && freq <= 1.5f) {
+        a->confident = abs(freq - 1.0f)/0.5f;
+        return BLINK_1HZ;
+    }
+    if (freq >= 0.2f && freq <= 0.3f) {
+        a->confident = abs(freq - 0.25f)/0.05f;
+        return BLINK_0_25HZ;
+    }
+    if (freq >= 0.010f && freq <= 0.021f) {
+        a->confident = abs(freq - 0.015f)/0.05f;
+        return BLINK_1_PER_MIN;
+    }  // ~1/60 Hz
+    if (freq >= 0.022f && freq <= 0.045f) {
+        a->confident = abs(freq - 0.034f)/0.01f;
+        return BLINK_2_PER_MIN;
+    }  // ~2/60 Hz
+    if (freq >= 0.045f && freq <= 0.055f) {
+        a->confident = abs(freq - 0.04f)/0.005f;
+        return BLINK_3_PER_MIN;
+    }  // ~3/60 Hz
 
     return UNKNOWN;
 }

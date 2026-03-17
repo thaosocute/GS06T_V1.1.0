@@ -57,7 +57,7 @@ uint8_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *respons
 
     int current = monitors_idx + 1;  // token đầu tiên của array
     for (int m = 0; m < arr_size; m++) {
-        if (tokens[current].type != JSMN_OBJECT) break;
+        if (current >= r || tokens[current].type != JSMN_OBJECT) break;
         int obj_size = tokens[current].size;  // số pairs
         int obj_start = current + 1;  // token đầu tiên của pairs
 
@@ -67,6 +67,7 @@ uint8_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *respons
         for (int k = 0; k < obj_size; k++) {
             int key_idx = obj_start + k * 2;
             int val_idx = obj_start + k * 2 + 1;
+            if (key_idx >= r || val_idx >= r) break;
 
             if (jsoneq(g_json_str, &tokens[key_idx], "id") == 0) {
                 json_parse_string(g_json_str, &tokens[val_idx], mon->id);
@@ -238,6 +239,7 @@ uint8_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, 
     for (int k = 0; k < data_size; k++) {
         int key_idx = data_start + k * 2;
         int val_idx = data_start + k * 2 + 1;
+        if (key_idx >= r || val_idx >= r) break;
         if (jsoneq(g_json_str, &tokens[key_idx], "ids") == 0 && tokens[val_idx].type == JSMN_ARRAY) {
             ids_idx = val_idx;
             break;
@@ -256,7 +258,7 @@ uint8_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, 
     int results_count = 0;
     int ids_current = ids_idx + 1;
     for (int m = 0; m < ids_size; m++) {
-        if (tokens[ids_current].type != JSMN_STRING) break;
+        if (ids_current >= r || tokens[ids_current].type != JSMN_STRING) break;
         char id_str[32];
         json_parse_string(g_json_str, &tokens[ids_current], id_str);
 

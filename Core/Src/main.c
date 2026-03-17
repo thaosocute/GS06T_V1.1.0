@@ -39,6 +39,7 @@ typedef StaticTask_t osStaticThreadDef_t;
 
 /* Private typedef -----------------------------------------------------------*/
 typedef StaticTask_t osStaticThreadDef_t;
+typedef StaticSemaphore_t osStaticSemaphoreDef_t;
 /* USER CODE BEGIN PTD */
 
 /* USER CODE END PTD */
@@ -63,10 +64,11 @@ TIM_HandleTypeDef htim6;
 
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_usart3_rx;
 
 /* Definitions for RS485_cmd */
 osThreadId_t RS485_cmdHandle;
-uint32_t RS485_cmdBuffer[ 2048 ];
+uint32_t RS485_cmdBuffer[ 4096 ];
 osStaticThreadDef_t RS485_cmdControlBlock;
 const osThreadAttr_t RS485_cmd_attributes = {
   .name = "RS485_cmd",
@@ -74,7 +76,7 @@ const osThreadAttr_t RS485_cmd_attributes = {
   .cb_size = sizeof(RS485_cmdControlBlock),
   .stack_mem = &RS485_cmdBuffer[0],
   .stack_size = sizeof(RS485_cmdBuffer),
-  .priority = (osPriority_t) osPriorityNormal,
+  .priority = (osPriority_t) osPriorityAboveNormal,
 };
 /* Definitions for Update_input */
 osThreadId_t Update_inputHandle;
@@ -88,6 +90,14 @@ const osThreadAttr_t Update_input_attributes = {
   .stack_size = sizeof(RS485_reportBuffer),
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
+/* Definitions for myBinarySem01 */
+osSemaphoreId_t myBinarySem01Handle;
+osStaticSemaphoreDef_t myBinarySem01ControlBlock;
+const osSemaphoreAttr_t myBinarySem01_attributes = {
+  .name = "myBinarySem01",
+  .cb_mem = &myBinarySem01ControlBlock,
+  .cb_size = sizeof(myBinarySem01ControlBlock),
+};
 /* USER CODE BEGIN PV */
 MAX3485_HandleTypeDef hmax3485_1;
 MAX3485_HandleTypeDef hmax3485_2;
@@ -95,7 +105,8 @@ MAX3485_HandleTypeDef hmax3485_2;
 uint8_t rx_buffer[RX_BUFFER_SIZE_MAX];
 uint8_t rx_data;  /* buffer for UART receive interrupt */
 uint16_t rx_index = 0;
-uint8_t Rx_flag = 0;
+// uint8_t Rx_flag = 0;
+uint16_t timer = 0;
 
 char response[RESPONSE_SIZE_MAX];
 
@@ -104,6 +115,7 @@ char response[RESPONSE_SIZE_MAX];
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_I2C3_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_USART3_UART_Init(void);
@@ -150,6 +162,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_I2C3_Init();
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
@@ -157,8 +170,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_GPIO_WritePin(RS485_DE1_GPIO_Port, RS485_DE1_Pin, GPIO_PIN_RESET);  /* ensure DE1 is low for receive mode */
   HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_RESET);  /* ensure DE2 is low for receive mode */
-  HAL_UART_Receive_IT(&huart2, &rx_data, 1);
-  HAL_UART_Receive_IT(&huart3, &rx_data, 1);  /* start UART receive interrupt for RS485 DE2 (if needed) */
+  
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart3, rx_buffer, RX_BUFFER_SIZE_MAX);
 
   HAL_GPIO_WritePin(BR_I1_GPIO_Port, BR_I1_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(BR_I2_GPIO_Port, BR_I2_Pin, GPIO_PIN_RESET);
@@ -185,6 +198,10 @@ int main(void)
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
+
+  /* Create the semaphores(s) */
+  /* creation of myBinarySem01 */
+  myBinarySem01Handle = osSemaphoreNew(1, 1, &myBinarySem01_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -440,6 +457,22 @@ static void MX_USART3_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -550,39 +583,19 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 /* Callback functions*/
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-	if (huart->Instance == USART3) {
-    if(Rx_flag == 0){
-      if(rx_data != 13){
-        rx_buffer[rx_index++] = rx_data;
-      }
-      else if(rx_data == 13){
-        rx_buffer[rx_index] = '\0';
-        rx_index = 0;
-        Rx_flag = 1;  /* set flag to indicate a complete command is received */
-      }
-      HAL_UART_Receive_IT(&huart3, &rx_data, 1);
-    }
-  }
-
-  if (huart->Instance == USART2) {
-    if(Rx_flag == 0) {  
-      if(rx_data != 13){
-        rx_buffer[rx_index++] = rx_data;
-      }
-      else if(rx_data == 13){
-        rx_buffer[rx_index] = '\0';
-        rx_index = 0;
-        Rx_flag = 1;  /* set flag to indicate a complete command is received */
-      }
-      HAL_UART_Receive_IT(&huart2, &rx_data, 1);
-    }
-  }
+  if(huart->Instance == USART3){
+		rx_index = Size;
+		timer = 0;
+	}
 }
 
 //functions
 void json_err_handle(json_err_t* err){
+  if(*err == ERR_NONE){
+    return;
+  }
   char err_code[20];
   strcpy(err_code, json_err_to_code(*err));
   max3485_transmit(&hmax3485_2, (uint8_t*)err_code, strlen(err_code), 1000);
@@ -609,11 +622,14 @@ void StartRS485CmdTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    if(Rx_flag)  /* check if a complete command is received */
+    if(timer >= 500 && rx_index > 0)  /* check if a complete command is received */
     {
+      timer = 0;
+      HAL_UART_DMAStop(&huart3);
       jsmn_parser parser;
       jsmntok_t tokens[TOKENS_NUM];
       json_err_t error = ERR_NONE;
+      char cmd[32];
       jsmn_init(&parser);
       ret = jsmn_parse(&parser, (const char *)rx_buffer, strlen((const char *)rx_buffer), tokens, TOKENS_NUM);
       if(ret < 0){
@@ -625,66 +641,68 @@ void StartRS485CmdTask(void *argument)
             if(jsoneq((const char *)rx_buffer, &tokens[i], "cmd") == 0) {
               // lấy giá trị của "cmd"
               jsmntok_t *cmd_token = &tokens[i + 1];
-              char cmd[32];
-              snprintf(cmd, sizeof(cmd), "%.*s\0", cmd_token->end - cmd_token->start, (const char *)rx_buffer + cmd_token->start);
-              json_cmd_t num;
-              num = json_cmd_from_str(cmd);
-              switch(num) {
-                case CMD_UNKNOWN:
-                  error = ERR_INVALID_CMD;
-                  break;
-                case CMD_MONITOR_CONFIG: {
-                  monitors_set_json((const char*)rx_buffer);
-                  uint8_t num_monitors = handle_monitors_config(tokens, ret, response, sizeof(response));
-                  if (num_monitors >= 0) {
-                      max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
-                      memset(response, 0, sizeof(response));
-                  }
-                  break;
-                }
-                case CMD_READ_PATTERN:
-                  monitors_set_json((const char*)rx_buffer);
-                  if(handle_read_pattern(tokens, ret, response, sizeof(response)) == 0) {
-                      max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
-                      memset(response, 0, sizeof(response));
-                  } else {
-                      error = ERR_JSON_PARSE;
-                  }
-                  break;
-                case CMD_READ_SNAPSHOT:
-                  break;
-                case CMD_POLL:
-                  break;
-                case CMD_FLUSH_EVENTS:
-                  break;
-                case CMD_PING:
-                  monitors_set_json((const char*)rx_buffer);
-                  if(handle_ping(tokens, ret, response, sizeof(response)) == 0) {
-                      max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
-                      memset(response, 0, sizeof(response));
-                  } else {
-                      error = ERR_JSON_PARSE;
-                  }
-                  break;
-                case CMD_RELAY_SET:
-                  break;
-                case CMD_RELAY_PULSE:
-                  break;
-                case CMD_RELAY_PULSE_SEQ:
-                  break;
-                case CMD_RESET:
-                  break;
-              }
+              snprintf(cmd, sizeof(cmd), "%.*s", cmd_token->end - cmd_token->start, (const char *)rx_buffer + cmd_token->start);
             }
           }
+        }
+        json_cmd_t num;
+        num = json_cmd_from_str(cmd);
+        switch(num) {
+          case CMD_UNKNOWN:
+            error = ERR_INVALID_CMD;
+            break;
+          case CMD_MONITOR_CONFIG: {
+            monitors_set_json((const char*)rx_buffer);
+            uint8_t num_monitors = handle_monitors_config(tokens, ret, response, sizeof(response));
+            if (num_monitors > 0) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            } else {
+              error = ERR_JSON_PARSE;
+            }
+              break;
+          }
+          case CMD_READ_PATTERN:
+            monitors_set_json((const char*)rx_buffer);
+            if(handle_read_pattern(tokens, ret, response, sizeof(response)) == 0) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            } else {
+              error = ERR_JSON_PARSE;
+            }
+            break;
+          case CMD_READ_SNAPSHOT:
+            break;
+          case CMD_POLL:
+            break;
+          case CMD_FLUSH_EVENTS:
+            break;
+          case CMD_PING:
+            monitors_set_json((const char*)rx_buffer);
+            if(handle_ping(tokens, ret, response, sizeof(response)) == 0) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            } else {
+              error = ERR_JSON_PARSE;
+            }
+            break;
+          case CMD_RELAY_SET:
+            break;
+          case CMD_RELAY_PULSE:
+            break;
+          case CMD_RELAY_PULSE_SEQ:
+            break;
+          case CMD_RESET:
+            break;
         }
       }
       json_err_handle(&error);
       error = ERR_NONE;
-      memset(rx_buffer, 0, sizeof(rx_buffer));
-      Rx_flag = 0;  /* reset flag for next command */
+      memset(rx_buffer, 0, RX_BUFFER_SIZE_MAX);
+      rx_index = 0;
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart3, rx_buffer, RX_BUFFER_SIZE_MAX);
     }
-    osDelay(200);
+    osDelay(100);
   }
   /* USER CODE END 5 */
 }
@@ -725,6 +743,7 @@ void StartUpdate_input(void *argument)
     if(count >= 25){
       count = 0;
       monitor_set_state_event();
+      HAL_GPIO_TogglePin(LED_STT_GPIO_Port, LED_STT_Pin);
     } 
     osDelay(50);  // �?�?c mỗi 100ms, có thể đi�?u chỉnh
   }

@@ -71,28 +71,6 @@ typedef enum {
     CLOSE
 } json_monitor_state_t;
 
-typedef enum {
-    INPUT_OFF = 0,
-    INPUT_ON,
-    //
-    INPUT_DETECTING,
-    INPUT_UNKNOWN,
-    //
-    INPUT_BLINK_1HZ,
-    INPUT_BLINK_2HZ,
-    INPUT_BLINK_4HZ,
-    INPUT_BLINK_5HZ,
-    INPUT_BLINK_8HZ,
-    INPUT_BLINK_0_25HZ,
-    //
-    INPUT_BLINK_1_PER_MIN,
-    INPUT_BLINK_2_PER_MIN,
-    INPUT_BLINK_3_PER_MIN,
-    INPUT_BEEP_ONCE,
-    INPUT_BEEP_1_PER_5S,
-    INPUT_BEEP_3_PER_1S5,
-    INPUT_BEEP_1_0S5_8S,
-}input_state_t;
 
 const char *json_cmd_to_str(json_cmd_t cmd);
 json_cmd_t json_cmd_from_str(const char *s);

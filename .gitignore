@@ -22,6 +22,8 @@ Objects/
 *.map
 *.d
 *.o
+*.ld
+*.launch
 
 # Backup files
 *.bak

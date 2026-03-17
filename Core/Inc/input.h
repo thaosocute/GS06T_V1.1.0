@@ -22,6 +22,7 @@ typedef struct {
     uint32_t transitions;   /* số lần thay đổi mức        */
     float    freq_hz;       /* tần số ước tính            */
     float    duty_cycle;    /* tỉ lệ HIGH / tổng          */
+    float    confident;
 } PinAnalysis;
 
 void push_input(uint16_t val);

@@ -393,8 +393,12 @@ JSMN_API int json_parse_uint64(const char *json, jsmntok_t *tok, uint64_t* value
 }
 JSMN_API int json_parse_string(const char *json, jsmntok_t *tok, char* value)
 {
+	int len = tok->end - tok->start;
+	if (len < 0) return 0;
+	int max_len = 31; // assume 32 byte buffer
+	if (len > max_len) len = max_len;
 	int j, k = 0;
-	for ( j = tok->start; j < tok->end; ++j, ++k)
+	for ( j = tok->start; j < tok->start + len; ++j, ++k)
 		value[k] = json[j];
 	value[k] = '\0';
 	return 1;
