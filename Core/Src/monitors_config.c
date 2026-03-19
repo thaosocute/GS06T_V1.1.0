@@ -22,6 +22,18 @@ void monitor_set_state_event() {
     }
 }
 
+static uint32_t find_seq_number(jsmntok_t *tokens, int token_count) {
+    uint32_t seq = 0;
+    for (int i = 1; i < token_count; i++) {
+        if (jsoneq(g_json_str, &tokens[i], "seq") == 0) {
+            uint64_t val;
+            json_parse_uint64(g_json_str, &tokens[i+1], &val);
+            seq = (uint32_t)val;
+            return seq;
+        }
+    }
+}
+
 uint8_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
     if (!g_json_str || !tokens || token_count <= 0) {
         return -1;
@@ -306,4 +318,20 @@ uint8_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, 
              seq, results_buf, events_buf);
 
     return 0;
+}
+
+uint8_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
+    if (!g_json_str || !tokens || token_count <= 0) {
+        return -1;
+    }
+    int r = token_count;
+
+    // Tìm "seq"
+    uint32_t seq = find_seq_number(tokens, r);
+
+    // lấy tick ms
+    uint32_t uptime_ms = HAL_GetTick();
+
+    // kiểm tra hàng chờ event xem có overflow không
+    char buf_overflow_string[5];
 }
