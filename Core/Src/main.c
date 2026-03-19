@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "stm32l4xx_hal_def.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -48,7 +49,7 @@ typedef StaticSemaphore_t osStaticSemaphoreDef_t;
 /* USER CODE BEGIN PD */
 #define TOKENS_NUM 192
 #define RX_BUFFER_SIZE_MAX 2048
-#define RESPONSE_SIZE_MAX 1024
+#define RESPONSE_SIZE_MAX 2048
 
 /* USER CODE END PD */
 
@@ -65,6 +66,7 @@ TIM_HandleTypeDef htim6;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 DMA_HandleTypeDef hdma_usart3_rx;
+DMA_HandleTypeDef hdma_usart3_tx;
 
 /* Definitions for RS485_cmd */
 osThreadId_t RS485_cmdHandle;
@@ -466,6 +468,9 @@ static void MX_DMA_Init(void)
   __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
+  /* DMA1_Channel2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
   /* DMA1_Channel3_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
@@ -480,8 +485,8 @@ static void MX_DMA_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+  /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
@@ -577,8 +582,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -598,7 +603,7 @@ void json_err_handle(json_err_t* err){
   }
   char err_code[20];
   strcpy(err_code, json_err_to_code(*err));
-  max3485_transmit(&hmax3485_2, (uint8_t*)err_code, strlen(err_code), 1000);
+  max3485_transmit(&hmax3485_2, (uint8_t*)err_code, strlen(err_code), HAL_MAX_DELAY);
 }
 
 //void handle_monitors_config();
@@ -672,6 +677,13 @@ void StartRS485CmdTask(void *argument)
             }
             break;
           case CMD_READ_SNAPSHOT:
+            monitors_set_json((const char*)rx_buffer);
+            if(handle_read_snapshot(tokens, ret, response, sizeof(response)) == 0) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            } else {
+              error = ERR_JSON_PARSE;
+            }
             break;
           case CMD_POLL:
             break;
@@ -702,7 +714,7 @@ void StartRS485CmdTask(void *argument)
       rx_index = 0;
       HAL_UARTEx_ReceiveToIdle_DMA(&huart3, rx_buffer, RX_BUFFER_SIZE_MAX);
     }
-    osDelay(100);
+    osDelay(200);
   }
   /* USER CODE END 5 */
 }
@@ -764,8 +776,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.
