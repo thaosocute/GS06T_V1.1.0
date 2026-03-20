@@ -539,6 +539,20 @@ json_err_t handle_poll(jsmntok_t *tokens, int token_count, char *response, size_
     queue_depth = events_count;
 
     // lấy các sự kiện (events)
+    int events_to_take = events_count;
+    if (events_to_take > 5) events_to_take = 5;
+
+    size_t events_buf_size = 32 + (size_t)events_to_take * 140;
+    if (events_buf_size < 128) events_buf_size = 128;
+    char *events_buf = (char *)malloc(events_buf_size);
+    if (!events_buf) {
+        return ERR_INVALID_CMD;
+    }
+    build_events_json(events_buf, events_buf_size, events_to_take);
+
+    int pending_events = events_count;
+    snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%ld,\"data\":{\"queue_depth\":%d},\"events\":%s,\"pending\":%d}", 
+            seq, queue_depth, events_buf, pending_events);
     
     return ERR_NONE;
 }

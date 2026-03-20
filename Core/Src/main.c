@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
-#include "stm32l4xx_hal_def.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -111,6 +110,8 @@ uint16_t rx_index = 0;
 uint16_t timer = 0;
 
 char response[RESPONSE_SIZE_MAX];
+
+Button_TypeDef button1 = RL1;
 
 /* USER CODE END PV */
 
@@ -671,6 +672,7 @@ void StartRS485CmdTask(void *argument)
             if(error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
+              release_button(&hi2c3, button1);
             }
             break;
           case CMD_READ_SNAPSHOT:
@@ -682,6 +684,12 @@ void StartRS485CmdTask(void *argument)
             }
             break;
           case CMD_POLL:
+            monitors_set_json((const char*)rx_buffer);
+            error = handle_poll(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
           case CMD_FLUSH_EVENTS:
             break;
@@ -691,6 +699,7 @@ void StartRS485CmdTask(void *argument)
             if(error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
+              press_button(&hi2c3, button1);
             }
             break;
           case CMD_RELAY_SET:

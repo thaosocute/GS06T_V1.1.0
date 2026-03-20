@@ -25,7 +25,7 @@ static Command_Button_Map command_button_map[] = {
         {"BR6", BR6}
 };
 
-void press_button(I2C_HandleTypeDef* hi2c, Button_TypeDef button, uint32_t hold_time_ms)
+void press_button(I2C_HandleTypeDef* hi2c, Button_TypeDef button)
 {
     if(button < BR1 && button >= RL1)
     {

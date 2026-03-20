@@ -9,7 +9,7 @@
 /* simulate a short press when only a count is specified */
 #define DEFAULT_PRESS_HOLD_MS 100
 
-void press_button(I2C_HandleTypeDef* hi2c, Button_TypeDef button, uint32_t hold_time_ms);
+void press_button(I2C_HandleTypeDef* hi2c, Button_TypeDef button);
 void release_button(I2C_HandleTypeDef* hi2c, Button_TypeDef button);
 void set_potentiometer(DS1804_HandleTypeDef* hds1804, uint8_t position);
 
