@@ -692,6 +692,12 @@ void StartRS485CmdTask(void *argument)
             }
             break;
           case CMD_FLUSH_EVENTS:
+            monitors_set_json((const char*)rx_buffer);
+            error = handle_flush_events(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
           case CMD_PING:
             monitors_set_json((const char*)rx_buffer);

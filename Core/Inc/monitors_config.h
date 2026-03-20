@@ -94,5 +94,6 @@ json_err_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_
 json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 json_err_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 json_err_t handle_poll(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
+json_err_t handle_flush_events(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 
 #endif //MONITOR_CONFIG_H

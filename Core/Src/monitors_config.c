@@ -253,7 +253,7 @@ json_err_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *resp
     }
 
     // Tạo response thành công
-    snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":[],\"pending\":0}", seq);
+    snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":[],\"pending\":0}\r\n", seq);
     return ERR_NONE;  // số monitors parsed
 }
 
@@ -441,7 +441,7 @@ json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *respons
     uint8_t pending_events = events_count - 1;
 
     // Build response
-    snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"results\":%s},\"events\":%s,\"pending\":%d}",
+    snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"results\":%s},\"events\":%s,\"pending\":%d}\r\n",
              seq, results_buf, events_buf, pending_events);
     free(results_buf);
     free(events_buf);
@@ -518,7 +518,7 @@ json_err_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *respon
 
     //build response
     snprintf(response, response_size,
-             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"ts_ms\":%lu,\"buf_overflow\":%s,\"objects\":[%s]},\"events\":%s,\"pending\":%d}",
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"ts_ms\":%lu,\"buf_overflow\":%s,\"objects\":[%s]},\"events\":%s,\"pending\":%d}\r\n",
              (unsigned long)seq, (unsigned long)uptime_ms, overflow_str, objects_buf, events_buf, pending_events);
 
     free(objects_buf);
@@ -551,8 +551,34 @@ json_err_t handle_poll(jsmntok_t *tokens, int token_count, char *response, size_
     build_events_json(events_buf, events_buf_size, events_to_take);
 
     int pending_events = events_count;
-    snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%ld,\"data\":{\"queue_depth\":%d},\"events\":%s,\"pending\":%d}", 
+    snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%ld,\"data\":{\"queue_depth\":%d},\"events\":%s,\"pending\":%d}\r\n", 
             seq, queue_depth, events_buf, pending_events);
     
+    return ERR_NONE;
+}
+
+json_err_t handle_flush_events(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
+     if (!g_json_str || !tokens || token_count <= 0) {
+        return ERR_INVALID_CMD;
+    }
+
+    // Tìm "seq"
+    uint32_t seq = find_seq_number(tokens, token_count);
+
+    // lấy các sự kiện (events)
+    int events_to_take = events_count;
+    if (events_to_take > 5) events_to_take = 5;
+
+    size_t events_buf_size = 32 + (size_t)events_to_take * 140;
+    if (events_buf_size < 128) events_buf_size = 128;
+    char *events_buf = (char *)malloc(events_buf_size);
+    if (!events_buf) {
+        return ERR_INVALID_CMD;
+    }
+    build_events_json(events_buf, events_buf_size, events_to_take);
+
+    int pending_events = events_count;
+    snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%ld,\"data\":null,\"events\":%s,\"pending\":%d}\r\n", 
+            seq, events_buf, pending_events);
     return ERR_NONE;
 }
