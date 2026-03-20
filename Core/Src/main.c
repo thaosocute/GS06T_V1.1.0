@@ -658,31 +658,27 @@ void StartRS485CmdTask(void *argument)
             break;
           case CMD_MONITOR_CONFIG: {
             monitors_set_json((const char*)rx_buffer);
-            uint8_t num_monitors = handle_monitors_config(tokens, ret, response, sizeof(response));
-            if (num_monitors > 0) {
+            error = handle_monitors_config(tokens, ret, response, sizeof(response));
+            if (error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
-            } else {
-              error = ERR_JSON_PARSE;
             }
-              break;
+            break;
           }
           case CMD_READ_PATTERN:
             monitors_set_json((const char*)rx_buffer);
-            if(handle_read_pattern(tokens, ret, response, sizeof(response)) == 0) {
+            error = handle_read_pattern(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
-            } else {
-              error = ERR_JSON_PARSE;
             }
             break;
           case CMD_READ_SNAPSHOT:
             monitors_set_json((const char*)rx_buffer);
-            if(handle_read_snapshot(tokens, ret, response, sizeof(response)) == 0) {
+            error = handle_read_snapshot(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
-            } else {
-              error = ERR_JSON_PARSE;
             }
             break;
           case CMD_POLL:
@@ -691,11 +687,10 @@ void StartRS485CmdTask(void *argument)
             break;
           case CMD_PING:
             monitors_set_json((const char*)rx_buffer);
-            if(handle_ping(tokens, ret, response, sizeof(response)) == 0) {
+            error = handle_ping(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
-            } else {
-              error = ERR_JSON_PARSE;
             }
             break;
           case CMD_RELAY_SET:

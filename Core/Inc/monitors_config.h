@@ -89,9 +89,10 @@ typedef struct {
 void monitors_set_json(const char *json_str);
 void monitor_set_state_event();
 
-uint8_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
-uint8_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
-uint8_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
-uint8_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
+json_err_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
+json_err_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
+json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
+json_err_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
+json_err_t handle_poll(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 
 #endif //MONITOR_CONFIG_H

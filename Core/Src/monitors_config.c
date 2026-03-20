@@ -1,5 +1,6 @@
 #include "monitors_config.h"
 #include "input.h"
+#include "json_cmd.h"
 #include <string.h>
 #include <stdlib.h>  // for strtol
 #include <stdio.h>   // for snprintf
@@ -68,26 +69,103 @@ static int get_latest_event(monitor_event_t *events_arr, char *buf, size_t buf_s
     } else {
         return -1;
     }
-
 }
 
-uint8_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
+static void build_events_json(char *out_buf, size_t out_buf_size, int events_to_take) {
+    if (!out_buf || out_buf_size == 0) return;
+    if (events_to_take > events_count) events_to_take = events_count;
+    if (events_to_take > 5) events_to_take = 5;
+    if (events_to_take <= 0) {
+        snprintf(out_buf, out_buf_size, "[]");
+        return;
+    }
+
+    size_t used = 0;
+    size_t remain = out_buf_size;
+
+    // Ghi "["
+    int n = snprintf(out_buf + used, remain, "[");
+    if (n < 0 || (size_t)n >= remain) goto fail;
+    used += (size_t)n;
+    remain = out_buf_size - used;
+
+    for (int i = 0; i < events_to_take; i++) {
+        int idx = (events_index - 1 - i + EVENTS_HISTORY_MAX) % EVENTS_HISTORY_MAX;
+        monitor_event_t *event = &monitors_event[idx];
+
+        // Tìm type của monitor
+        const char *type_str = "unknown";
+        for (int j = 0; j < MONITORS_NUM_MAX; j++) {
+            if (monitors_arr[j].id[0] != '\0' &&
+                strcmp(monitors_arr[j].id, event->monitor_id) == 0) {
+                type_str = monitor_type_to_str(monitors_arr[j].type);
+                break;
+            }
+        }
+
+        // Thêm dấu "," giữa các object
+        if (i > 0) {
+            if (remain < 2) goto close;
+            out_buf[used++] = ',';
+            out_buf[used] = '\0';
+            remain = out_buf_size - used;
+        }
+
+        // Ghi JSON object
+        n = snprintf(out_buf + used, remain,
+                     "{\"id\":\"%s\",\"type\":\"%s\","
+                     "\"state\":\"%s\",\"prev\":\"%s\",\"ts_ms\":%lu}",
+                     event->monitor_id, type_str,
+                     state_to_str(event->current_state),
+                     state_to_str(event->prev_state),
+                     (unsigned long)event->event_time);
+        if (n < 0 || (size_t)n >= remain) goto close;
+        used += (size_t)n;
+        remain = out_buf_size - used;
+    }
+
+close:
+    // Ghi "]"
+    if (remain >= 2) {
+        out_buf[used++] = ']';
+        out_buf[used] = '\0';
+    } else {
+        snprintf(out_buf, out_buf_size, "[]");
+    }
+
+    // Cập nhật lại buffer state
+    events_count -= events_to_take;
+    if (events_count < 0) events_count = 0;
+    events_index = (events_index - events_to_take + EVENTS_HISTORY_MAX) % EVENTS_HISTORY_MAX;
+    return;
+
+fail:
+    snprintf(out_buf, out_buf_size, "[]");
+}
+
+json_err_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
     if (!g_json_str || !tokens || token_count <= 0) {
-        return -1;
+        return ERR_JSON_PARSE;
     }
     int r = token_count;
 
+    uint8_t found = 0;
     // Tìm "seq"
     uint32_t seq = 0;
+    
     for (int i = 1; i < r; i++) {
         if (jsoneq(g_json_str, &tokens[i], "seq") == 0) {
             uint64_t val;
             json_parse_uint64(g_json_str, &tokens[i+1], &val);
             seq = (uint32_t)val;
+            found = 1;
             break;
         }
     }
 
+    if(!found) {
+        return ERR_INVALID_CMD;
+    } 
     // Tìm key "monitors"
     int monitors_idx = -1;
     for (int i = 1; i < r; i++) {
@@ -98,7 +176,7 @@ uint8_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *respons
     }
     if (monitors_idx == -1) {
         //snprintf(response, response_size, "{\"cmd\":\"error\",\"seq\":%u,\"data\":null,\"events\":[],\"pending\":0}", seq);
-        return -1;
+        return ERR_INVALID_CMD;
     }
 
     int arr_size = tokens[monitors_idx].size;
@@ -176,12 +254,12 @@ uint8_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *respons
 
     // Tạo response thành công
     snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":[],\"pending\":0}", seq);
-    return arr_size;  // số monitors parsed
+    return ERR_NONE;  // số monitors parsed
 }
 
-uint8_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
+json_err_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
     if (!g_json_str || !tokens || token_count <= 0) {
-        return -1;
+        return ERR_INVALID_CMD;
     }
 
     int r = token_count;
@@ -229,7 +307,7 @@ uint8_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_t r
              "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"uptime_ms\":%lu,\"fw_version\":\"%s\",\"num_monitors\":%d},\"events\":%s,\"pending\":%lu}",
              seq, uptime_ms, FIRMWARE_VERSION, num_monitors, events_str, pending);
 
-    return 0;
+    return ERR_NONE;
 }
 
 static int state_to_code(json_monitor_state_t state) {
@@ -242,9 +320,9 @@ static float get_confidence(json_monitor_state_t state) {
     return 1.0f;
 }
 
-uint8_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
+json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
     if (!g_json_str || !tokens || token_count <= 0) {
-        return -1;
+        return ERR_INVALID_CMD;
     }
     int r = token_count;
 
@@ -268,7 +346,7 @@ uint8_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, 
         }
     }
     if (data_idx == -1) {
-        return -1;
+        return ERR_INVALID_CMD;
     }
 
     // Trong data, tìm "ids"
@@ -285,7 +363,7 @@ uint8_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, 
         }
     }
     if (ids_idx == -1) {
-        return -1;
+        return ERR_INVALID_CMD;
     }
 
     int ids_size = tokens[ids_idx].size;
@@ -296,14 +374,14 @@ uint8_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, 
     if (results_buf_size < 256) results_buf_size = 256;
     char *results_buf = malloc(results_buf_size);
     if (!results_buf) {
-        return -1;
+        return ERR_INVALID_DATA;
     }
     size_t results_used = 0;
     size_t results_remain = results_buf_size;
     int n = snprintf(results_buf + results_used, results_remain, "[");
     if (n < 0 || (size_t)n >= results_remain) {
         free(results_buf);
-        return -1;
+        return ERR_INVALID_DATA;
     }
     results_used += (size_t)n;
     results_remain = results_buf_size - results_used;
@@ -355,57 +433,30 @@ uint8_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, 
     char *events_buf = malloc(events_buf_size);
     if (!events_buf) {
         free(results_buf);
-        return -1;
+        return ERR_INVALID_DATA;
     }
     if (get_latest_event(monitors_event, events_buf, events_buf_size) != 0) {
         strcpy(events_buf, "[]");
     }
-    int pending_events = events_count - 1;
-    // // Get latest event
-    // char events_buf[256] = "[]";
-    // if (events_count > 0) {
-    //     int latest_idx = (events_index - 1 + EVENTS_HISTORY_MAX) % EVENTS_HISTORY_MAX;
-    //     monitor_event_t *event = &monitors_event[latest_idx];
-    //     if(event->high_count + event->low_count > 0) {
-    //         events_index--;
-    //     }
-    //     // Find monitor type
-    //     const char *type_str = "unknown";
-    //     for (int i = 0; i < 16; i++) {
-    //         if (strcmp(monitors_arr[i].id, event->monitor_id) == 0) {
-    //             type_str = monitor_type_to_str(monitors_arr[i].type);
-    //             break;
-    //         }
-    //     }
-    //     snprintf(events_buf, sizeof(events_buf), "[{\"id\":\"%s\",\"type\":\"%s\",\"state\":\"%s\",\"prev\":\"%s\",\"ts_ms\":%lu}]",
-    //              event->monitor_id, type_str, state_to_str(event->current_state), state_to_str(event->prev_state), event->event_time);
-    // }
+    uint8_t pending_events = events_count - 1;
 
     // Build response
     snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"results\":%s},\"events\":%s,\"pending\":%d}",
              seq, results_buf, events_buf, pending_events);
     free(results_buf);
     free(events_buf);
-    return 0;
+    return ERR_NONE;
 }
 
-static int create_object_result(Monitor *monitor, char *buf, size_t buf_size) {
-    const char *type_str = "unknown";
-    const char *state_str = "unknown";
-    type_str = monitor_type_to_str(monitor->type);
-    state_str = state_to_str(monitor->state);
-    return snprintf(buf, buf_size, "{\"id\":\"%s\",\"type\":\"%s\", \"state\":\"%s\",\"state_code\":%d},",
-        monitor->id, type_str, state_str, state_to_code(monitor->state));
-}
 
-uint8_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
+
+json_err_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
     if (!g_json_str || !tokens || token_count <= 0) {
-        return -1;
+        return ERR_INVALID_CMD;
     }
-    int r = token_count;
 
     // Tìm "seq"
-    uint32_t seq = find_seq_number(tokens, r);
+    uint32_t seq = find_seq_number(tokens, token_count);
 
     // lấy tick ms
     uint32_t uptime_ms = HAL_GetTick();
@@ -420,7 +471,7 @@ uint8_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *response,
     if (objects_buf_size < 256) objects_buf_size = 256;
     char *objects_buf = (char *)malloc(objects_buf_size);
     if (!objects_buf) {
-        return -1;
+        return ERR_INVALID_CMD;
     }
     objects_buf[0] = '\0';
     size_t obj_remain = objects_buf_size;
@@ -448,7 +499,7 @@ uint8_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *response,
         obj_remain = objects_buf_size - obj_used;
         object_count++;
     }
-
+    
     int events_to_take = events_count;
     if (events_to_take > 5) events_to_take = 5;
 
@@ -457,65 +508,37 @@ uint8_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *response,
     char *events_buf = (char *)malloc(events_buf_size);
     if (!events_buf) {
         free(objects_buf);
-        return -1;
-    }
-    size_t evt_used = 0;
-    size_t evt_remain = events_buf_size;
-    int n = snprintf(events_buf + evt_used, evt_remain, "[");
-    if (n < 0 || (size_t)n >= evt_remain) {
-        free(objects_buf);
-        free(events_buf);
-        return -1;
-    }
-    evt_used += (size_t)n;
-    evt_remain = events_buf_size - evt_used;
-
-    for (int i = 0; i < events_to_take; i++) {
-        int idx = (events_index - 1 - i + EVENTS_HISTORY_MAX) % EVENTS_HISTORY_MAX;
-        monitor_event_t *event = &monitors_event[idx];
-        const char *type_str = "unknown";
-        for (int j = 0; j < MONITORS_NUM_MAX; j++) {
-            if (monitors_arr[j].id[0] != '\0' && strcmp(monitors_arr[j].id, event->monitor_id) == 0) {
-                type_str = monitor_type_to_str(monitors_arr[j].type);
-                break;
-            }
-        }
-        if (i > 0) {
-            if (evt_used + 1 < events_buf_size) {
-                events_buf[evt_used++] = ',';
-                events_buf[evt_used] = '\0';
-                evt_remain = events_buf_size - evt_used;
-            }
-        }
-        n = snprintf(events_buf + evt_used, evt_remain,
-                     "{\"id\":\"%s\",\"type\":\"%s\",\"state\":\"%s\",\"prev\":\"%s\",\"ts_ms\":%lu}",
-                     event->monitor_id, type_str,
-                     state_to_str(event->current_state), state_to_str(event->prev_state), (unsigned long)event->event_time);
-        if (n < 0 || (size_t)n >= evt_remain) {
-            break;
-        }
-        evt_used += (size_t)n;
-        evt_remain = events_buf_size - evt_used;
-    }
-    if (evt_used + 2 < events_buf_size) {
-        events_buf[evt_used++] = ']';
-        events_buf[evt_used] = '\0';
-    } else {
-        snprintf(events_buf, events_buf_size, "[]");
+        return ERR_INVALID_CMD;
     }
 
-    int pending_events = events_count - events_to_take;
-    if (pending_events < 0) pending_events = 0;
-    events_count -= events_to_take;
-    if (events_count < 0) events_count = 0;
-    events_index = (events_index - events_to_take + EVENTS_HISTORY_MAX) % EVENTS_HISTORY_MAX;
+    build_events_json(events_buf, events_buf_size, events_to_take);
+    int pending_events = events_count;
+
     const char *overflow_str = (events_count >= EVENTS_HISTORY_MAX) ? "true" : "false";
 
+    //build response
     snprintf(response, response_size,
              "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"ts_ms\":%lu,\"buf_overflow\":%s,\"objects\":[%s]},\"events\":%s,\"pending\":%d}",
              (unsigned long)seq, (unsigned long)uptime_ms, overflow_str, objects_buf, events_buf, pending_events);
 
     free(objects_buf);
     free(events_buf);
-    return 0;
+    return ERR_NONE;
+}
+
+json_err_t handle_poll(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
+    if (!g_json_str || !tokens || token_count <= 0) {
+        return ERR_INVALID_CMD;
+    }
+
+    // Tìm "seq"
+    uint32_t seq = find_seq_number(tokens, token_count);
+
+    // tính queue depth
+    int queue_depth = 0;
+    queue_depth = events_count;
+
+    // lấy các sự kiện (events)
+    
+    return ERR_NONE;
 }

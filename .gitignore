@@ -7,7 +7,7 @@ cmake/
 
 # IDE files (STM32CubeIDE)
 .settings/
-.cproject
+# .cproject
 .project
 .mxproject
 .clangd
