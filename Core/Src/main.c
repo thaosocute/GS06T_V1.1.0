@@ -208,6 +208,8 @@ int main(void)
 
   HAL_GPIO_WritePin(EN1_GPIO_Port, EN1_Pin, GPIO_PIN_SET); 
   HAL_GPIO_WritePin(EN2_GPIO_Port, EN2_Pin, GPIO_PIN_SET);
+
+  HAL_TIM_Base_Start_IT(&htim6);
   
   /* USER CODE END 2 */
 
@@ -615,7 +617,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance != TIM6) return;
+  if (htim->Instance != TIM6) return;
 
   tim6_tick_ms++;
 

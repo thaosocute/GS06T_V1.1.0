@@ -244,7 +244,7 @@ void handle_error(json_err_t error, uint32_t seq, char *response, size_t respons
     int pending_events = events_count;
 
     // tạo response
-    snprintf(response, response_size, "{\"cmd\":\"error\",\"seq\":%ld,\"data\":{\"code\":\"%s\",\"msg\":\"%s\"},\"events\":%s,\"pending\":%d}", 
+    snprintf(response, response_size, "{\"cmd\":\"error\",\"seq\":%ld,\"data\":{\"code\":\"%s\",\"msg\":\"%s\"},\"events\":%s,\"pending\":%d}\r\n", 
         seq, err_code, msg_string, events_buf, pending_events);
     
     free(events_buf);
@@ -415,7 +415,7 @@ json_err_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_
     int pending_events = events_count;
 
     snprintf(response, response_size,
-             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"uptime_ms\":%lu,\"fw_version\":\"%s\",\"num_monitors\":%d},\"events\":%s,\"pending\":%d}",
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"uptime_ms\":%lu,\"fw_version\":\"%s\",\"num_monitors\":%d},\"events\":%s,\"pending\":%d}\r\n",
              seq, uptime_ms, FIRMWARE_VERSION, num_monitors, events_buf, pending_events);
     free(events_buf);
     return ERR_NONE;
@@ -522,7 +522,7 @@ json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *respons
             uint32_t ts_ms = HAL_GetTick();
             float conf = get_confidence(mon->state);
             n = snprintf(results_buf + results_used, results_remain,
-                         "{\"id\":\"%s\",\"state\":\"%s\",\"state_code\":%d,\"confidence\":%.2f,\"ts_ms\":%lu}",
+                         "{\"id\":\"%s\",\"state\":\"%s\",\"state_code\":%d,\"confidence\":%.2f,\"ts_ms\":%lu}\r\n",
                          mon->id, state_to_str(mon->state), state_to_code(mon->state), conf, (unsigned long)ts_ms);
             if (n < 0 || (size_t)n >= results_remain) {
                 break;
@@ -760,10 +760,25 @@ json_err_t handle_relay_set(jsmntok_t *tokens, int token_count, char *response, 
         return ERR_INVALID_DATA;
     }
 
-    snprintf(response, response_size,
-             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":[],\"pending\":0}",
-             (unsigned long)seq);
+    // lấy các sự kiện (events)
+    int events_to_take = events_count;
+    if (events_to_take > 5) events_to_take = 5;
 
+    size_t events_buf_size = 32 + (size_t)events_to_take * 140;
+    if (events_buf_size < 128) events_buf_size = 128;
+    char *events_buf = (char *)malloc(events_buf_size);
+    if (!events_buf) {
+        return ERR_INVALID_CMD;
+    }
+    build_events_json(events_buf, events_buf_size, events_to_take);
+
+    int pending_events = events_count;
+
+    snprintf(response, response_size,
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":%s,\"pending\":%d}\r\n",
+             (unsigned long)seq, events_buf, pending_events);
+
+    free(events_buf);
     return ERR_NONE;
 }
 
@@ -833,10 +848,25 @@ json_err_t handle_relay_pulse(jsmntok_t *tokens, int token_count, char *response
     tim6_pulse_active = 1;
     __enable_irq();
 
-    snprintf(response, response_size,
-             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":[],\"pending\":0}",
-             (unsigned long)seq);
+    // lấy các sự kiện (events)
+    int events_to_take = events_count;
+    if (events_to_take > 5) events_to_take = 5;
 
+    size_t events_buf_size = 32 + (size_t)events_to_take * 140;
+    if (events_buf_size < 128) events_buf_size = 128;
+    char *events_buf = (char *)malloc(events_buf_size);
+    if (!events_buf) {
+        return ERR_INVALID_CMD;
+    }
+    build_events_json(events_buf, events_buf_size, events_to_take);
+
+    int pending_events = events_count;
+
+    snprintf(response, response_size,
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":%s,\"pending\":%d}\r\n",
+             (unsigned long)seq, events_buf, pending_events);
+
+    free(events_buf);
     return ERR_NONE;
 }
 
@@ -956,9 +986,24 @@ json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *resp
     press_button(&hi2c3, button);
     __enable_irq();
 
-    snprintf(response, response_size,
-             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":[],\"pending\":0}",
-             (unsigned long)seq);
+    // lấy các sự kiện (events)
+    int events_to_take = events_count;
+    if (events_to_take > 5) events_to_take = 5;
 
+    size_t events_buf_size = 32 + (size_t)events_to_take * 140;
+    if (events_buf_size < 128) events_buf_size = 128;
+    char *events_buf = (char *)malloc(events_buf_size);
+    if (!events_buf) {
+        return ERR_INVALID_CMD;
+    }
+    build_events_json(events_buf, events_buf_size, events_to_take);
+
+    int pending_events = events_count;
+
+    snprintf(response, response_size,
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":%s,\"pending\":%d}\r\n",
+             (unsigned long)seq, events_buf, pending_events);
+
+    free(events_buf);
     return ERR_NONE;
 }
