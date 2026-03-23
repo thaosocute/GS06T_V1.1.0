@@ -48,7 +48,7 @@ typedef StaticSemaphore_t osStaticSemaphoreDef_t;
 /* USER CODE BEGIN PD */
 #define TOKENS_NUM 192
 #define RX_BUFFER_SIZE_MAX 2048
-#define RESPONSE_SIZE_MAX 1024
+#define RESPONSE_SIZE_MAX 2048
 
 /* USER CODE END PD */
 
@@ -107,8 +107,25 @@ uint8_t rx_data;  /* buffer for UART receive interrupt */
 uint16_t rx_index = 0;
 // uint8_t Rx_flag = 0;
 uint16_t timer = 0;
+uint16_t Countimer = 0;
+volatile uint32_t tim6_tick_ms = 0;
+volatile uint8_t tim6_pulse_active = 0;
+volatile uint8_t tim6_pulse_button = 0;
+volatile uint32_t tim6_pulse_end_tick = 0;
+volatile uint8_t tim6_pulse_seq_active = 0;
+volatile uint8_t tim6_pulse_seq_button = 0;
+volatile uint8_t tim6_pulse_seq_phase = 0; /* 1: pulse on, 2: gap off */
+volatile uint8_t tim6_pulse_seq_index = 0;
+volatile uint8_t tim6_pulse_seq_count = 0;
+volatile uint32_t tim6_pulse_seq_deadline = 0;
+volatile uint32_t tim6_pulse_seq_pulse_ms[RELAY_PULSE_SEQ_MAX_STEPS] = {0};
+volatile uint32_t tim6_pulse_seq_gap_ms[RELAY_PULSE_SEQ_MAX_STEPS] = {0};
+volatile uint8_t tim6_press_req = 0;
+volatile uint8_t tim6_release_req = 0;
 
 char response[RESPONSE_SIZE_MAX];
+
+Button_TypeDef button1 = RL1;
 
 /* USER CODE END PV */
 
@@ -168,6 +185,7 @@ int main(void)
   MX_USART3_UART_Init();
   MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
+  HAL_TIM_Base_Start_IT(&htim6);
   HAL_GPIO_WritePin(RS485_DE1_GPIO_Port, RS485_DE1_Pin, GPIO_PIN_RESET);  /* ensure DE1 is low for receive mode */
   HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_RESET);  /* ensure DE2 is low for receive mode */
   
@@ -366,9 +384,9 @@ static void MX_TIM6_Init(void)
 
   /* USER CODE END TIM6_Init 1 */
   htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 0;
+  htim6.Init.Prescaler = 3;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 65535;
+  htim6.Init.Period = 999;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -582,6 +600,53 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance != TIM6) return;
+
+  tim6_tick_ms++;
+
+  if (tim6_pulse_active && (int32_t)(tim6_tick_ms - tim6_pulse_end_tick) >= 0) {
+    release_button(&hi2c3, (Button_TypeDef)tim6_pulse_button);
+    tim6_pulse_active = 0;
+  }
+
+  if (tim6_pulse_seq_active && (int32_t)(tim6_tick_ms - tim6_pulse_seq_deadline) >= 0) {
+    if (tim6_pulse_seq_phase == 1) {
+      release_button(&hi2c3, (Button_TypeDef)tim6_pulse_seq_button);
+
+      if (tim6_pulse_seq_index >= tim6_pulse_seq_count - 1) {
+        tim6_pulse_seq_active = 0;
+        tim6_pulse_seq_phase = 0;
+      } else {
+        uint32_t gap_ms = tim6_pulse_seq_gap_ms[tim6_pulse_seq_index];
+        tim6_pulse_seq_phase = 2;
+        tim6_pulse_seq_deadline = tim6_tick_ms + gap_ms;
+      }
+    } else if (tim6_pulse_seq_phase == 2) {
+      tim6_pulse_seq_index++;
+      if (tim6_pulse_seq_index >= tim6_pulse_seq_count) {
+        tim6_pulse_seq_active = 0;
+        tim6_pulse_seq_phase = 0;
+      } else {
+        press_button(&hi2c3, (Button_TypeDef)tim6_pulse_seq_button);
+        tim6_pulse_seq_phase = 1;
+        tim6_pulse_seq_deadline = tim6_tick_ms + tim6_pulse_seq_pulse_ms[tim6_pulse_seq_index];
+      }
+    }
+  }
+
+    // Countimer++;
+
+    // if (Countimer == 1) {
+    // tim6_press_req = 1;
+    // } else if (Countimer == 200) {
+    // tim6_release_req = 1;
+    // } else if (Countimer >= 400) {
+    //     Countimer = 0;
+    // }
+}
 /* Callback functions*/
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
@@ -598,7 +663,7 @@ void json_err_handle(json_err_t* err){
   }
   char err_code[20];
   strcpy(err_code, json_err_to_code(*err));
-  max3485_transmit(&hmax3485_2, (uint8_t*)err_code, strlen(err_code), 1000);
+  max3485_transmit(&hmax3485_2, (uint8_t*)err_code, strlen(err_code), HAL_MAX_DELAY);
 }
 
 //void handle_monitors_config();
@@ -653,44 +718,72 @@ void StartRS485CmdTask(void *argument)
             break;
           case CMD_MONITOR_CONFIG: {
             monitors_set_json((const char*)rx_buffer);
-            uint8_t num_monitors = handle_monitors_config(tokens, ret, response, sizeof(response));
-            if (num_monitors > 0) {
+            error = handle_monitors_config(tokens, ret, response, sizeof(response));
+            if (error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
-            } else {
-              error = ERR_JSON_PARSE;
             }
-              break;
+            break;
           }
           case CMD_READ_PATTERN:
             monitors_set_json((const char*)rx_buffer);
-            if(handle_read_pattern(tokens, ret, response, sizeof(response)) == 0) {
+            error = handle_read_pattern(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
-            } else {
-              error = ERR_JSON_PARSE;
+              release_button(&hi2c3, button1);
             }
             break;
           case CMD_READ_SNAPSHOT:
+            monitors_set_json((const char*)rx_buffer);
+            error = handle_read_snapshot(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
           case CMD_POLL:
+            monitors_set_json((const char*)rx_buffer);
+            error = handle_poll(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
           case CMD_FLUSH_EVENTS:
             break;
           case CMD_PING:
             monitors_set_json((const char*)rx_buffer);
-            if(handle_ping(tokens, ret, response, sizeof(response)) == 0) {
+            error = handle_ping(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
-            } else {
-              error = ERR_JSON_PARSE;
+              press_button(&hi2c3, button1);
             }
             break;
           case CMD_RELAY_SET:
+            monitors_set_json((const char*)rx_buffer);
+            error = handle_relay_set(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
           case CMD_RELAY_PULSE:
+          monitors_set_json((const char*)rx_buffer);  
+          error = handle_relay_pulse(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
           case CMD_RELAY_PULSE_SEQ:
+          monitors_set_json((const char*)rx_buffer);  
+          error = handle_relay_pulse_seq(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
           case CMD_RESET:
             break;
@@ -702,7 +795,7 @@ void StartRS485CmdTask(void *argument)
       rx_index = 0;
       HAL_UARTEx_ReceiveToIdle_DMA(&huart3, rx_buffer, RX_BUFFER_SIZE_MAX);
     }
-    osDelay(100);
+    osDelay(200);
   }
   /* USER CODE END 5 */
 }
@@ -721,31 +814,48 @@ void StartUpdate_input(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    // uint16_t input_state = 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN1_GPIO_Port, IN1_Pin) == GPIO_PIN_RESET) ? (1 << 0) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN2_GPIO_Port, IN2_Pin) == GPIO_PIN_RESET) ? (1 << 1) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN3_GPIO_Port, IN3_Pin) == GPIO_PIN_RESET) ? (1 << 2) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN4_GPIO_Port, IN4_Pin) == GPIO_PIN_RESET) ? (1 << 3) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN5_GPIO_Port, IN5_Pin) == GPIO_PIN_RESET) ? (1 << 4) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN6_GPIO_Port, IN6_Pin) == GPIO_PIN_RESET) ? (1 << 5) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN7_GPIO_Port, IN7_Pin) == GPIO_PIN_RESET) ? (1 << 6) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN8_GPIO_Port, IN8_Pin) == GPIO_PIN_RESET) ? (1 << 7) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN9_GPIO_Port, IN9_Pin) == GPIO_PIN_RESET) ? (1 << 8) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN10_GPIO_Port, IN10_Pin) == GPIO_PIN_RESET) ? (1 << 9) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN11_GPIO_Port, IN11_Pin) == GPIO_PIN_RESET) ? (1 << 10) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN12_GPIO_Port, IN12_Pin) == GPIO_PIN_RESET) ? (1 << 11) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN13_GPIO_Port, IN13_Pin) == GPIO_PIN_RESET) ? (1 << 12) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN14_GPIO_Port, IN14_Pin) == GPIO_PIN_RESET) ? (1 << 13) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN15_GPIO_Port, IN15_Pin) == GPIO_PIN_RESET) ? (1 << 14) : 0;
-    // input_state |= (HAL_GPIO_ReadPin(IN16_GPIO_Port, IN16_Pin) == GPIO_PIN_RESET) ? (1 << 15) : 0;
-    // push_input(input_state);
-    // count++;
-    // if(count >= 25){
-    //   count = 0;
-    //   monitor_set_state_event();
-    //   HAL_GPIO_TogglePin(LED_STT_GPIO_Port, LED_STT_Pin);
-    // } 
-    // osDelay(50);  // �?�?c mỗi 100ms, có thể đi�?u chỉnh
+    // if (tim6_press_req) {
+    //   __disable_irq();
+    //   tim6_press_req = 0;
+    //   __enable_irq();
+    //   press_button(&hi2c3, RL1);
+    // }
+
+    // if (tim6_release_req) {
+    //   __disable_irq();
+    //   tim6_release_req = 0;
+    //   __enable_irq();
+    //   release_button(&hi2c3, RL1);
+    // }
+
+//    uint16_t input_state = 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN1_GPIO_Port, IN1_Pin) == GPIO_PIN_RESET) ? (1 << 0) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN2_GPIO_Port, IN2_Pin) == GPIO_PIN_RESET) ? (1 << 1) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN3_GPIO_Port, IN3_Pin) == GPIO_PIN_RESET) ? (1 << 2) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN4_GPIO_Port, IN4_Pin) == GPIO_PIN_RESET) ? (1 << 3) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN5_GPIO_Port, IN5_Pin) == GPIO_PIN_RESET) ? (1 << 4) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN6_GPIO_Port, IN6_Pin) == GPIO_PIN_RESET) ? (1 << 5) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN7_GPIO_Port, IN7_Pin) == GPIO_PIN_RESET) ? (1 << 6) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN8_GPIO_Port, IN8_Pin) == GPIO_PIN_RESET) ? (1 << 7) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN9_GPIO_Port, IN9_Pin) == GPIO_PIN_RESET) ? (1 << 8) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN10_GPIO_Port, IN10_Pin) == GPIO_PIN_RESET) ? (1 << 9) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN11_GPIO_Port, IN11_Pin) == GPIO_PIN_RESET) ? (1 << 10) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN12_GPIO_Port, IN12_Pin) == GPIO_PIN_RESET) ? (1 << 11) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN13_GPIO_Port, IN13_Pin) == GPIO_PIN_RESET) ? (1 << 12) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN14_GPIO_Port, IN14_Pin) == GPIO_PIN_RESET) ? (1 << 13) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN15_GPIO_Port, IN15_Pin) == GPIO_PIN_RESET) ? (1 << 14) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN16_GPIO_Port, IN16_Pin) == GPIO_PIN_RESET) ? (1 << 15) : 0;
+//    push_input(input_state);
+//    count++;
+//    if(count >= 25){
+//      count = 0;
+//      monitor_set_state_event();
+//      HAL_GPIO_TogglePin(LED_STT_GPIO_Port, LED_STT_Pin);
+//    }
+//	  press_button(&hi2c3, button1);
+//    osDelay(300);
+//    release_button(&hi2c3, button1);
+//    osDelay(300);
   }
   /* USER CODE END StartUpdate_input */
 }
