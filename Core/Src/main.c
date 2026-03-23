@@ -111,7 +111,23 @@ uint16_t timer = 0;
 
 char response[RESPONSE_SIZE_MAX];
 
-Button_TypeDef button1 = RL1;
+extern char error_reason[32];
+
+uint16_t Countimer = 0;
+volatile uint32_t tim6_tick_ms = 0;
+volatile uint8_t tim6_pulse_active = 0;
+volatile uint8_t tim6_pulse_button = 0;
+volatile uint32_t tim6_pulse_end_tick = 0;
+volatile uint8_t tim6_pulse_seq_active = 0;
+volatile uint8_t tim6_pulse_seq_button = 0;
+volatile uint8_t tim6_pulse_seq_phase = 0; /* 1: pulse on, 2: gap off */
+volatile uint8_t tim6_pulse_seq_index = 0;
+volatile uint8_t tim6_pulse_seq_count = 0;
+volatile uint32_t tim6_pulse_seq_deadline = 0;
+volatile uint32_t tim6_pulse_seq_pulse_ms[RELAY_PULSE_SEQ_MAX_STEPS] = {0};
+volatile uint32_t tim6_pulse_seq_gap_ms[RELAY_PULSE_SEQ_MAX_STEPS] = {0};
+volatile uint8_t tim6_press_req = 0;
+volatile uint8_t tim6_release_req = 0;
 
 /* USER CODE END PV */
 
@@ -127,7 +143,7 @@ void StartRS485CmdTask(void *argument);
 void StartUpdate_input(void *argument);
 
 /* USER CODE BEGIN PFP */
-void json_err_handle(json_err_t* err);
+// void json_err_handle(json_err_t* err);
 
 /* USER CODE END PFP */
 
@@ -369,9 +385,9 @@ static void MX_TIM6_Init(void)
 
   /* USER CODE END TIM6_Init 1 */
   htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 0;
+  htim6.Init.Prescaler = 3;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 65535;
+  htim6.Init.Period = 999;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -597,15 +613,52 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 	}
 }
 
-//functions
-void json_err_handle(json_err_t* err){
-  if(*err == ERR_NONE){
-    return;
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance != TIM6) return;
+
+  tim6_tick_ms++;
+
+  if (tim6_pulse_active && (int32_t)(tim6_tick_ms - tim6_pulse_end_tick) >= 0) {
+    release_button(&hi2c3, (Button_TypeDef)tim6_pulse_button);
+    tim6_pulse_active = 0;
   }
-  char err_code[20];
-  strcpy(err_code, json_err_to_code(*err));
-  max3485_transmit(&hmax3485_2, (uint8_t*)err_code, strlen(err_code), HAL_MAX_DELAY);
+
+  if (tim6_pulse_seq_active && (int32_t)(tim6_tick_ms - tim6_pulse_seq_deadline) >= 0) {
+    if (tim6_pulse_seq_phase == 1) {
+      release_button(&hi2c3, (Button_TypeDef)tim6_pulse_seq_button);
+
+      if (tim6_pulse_seq_index >= tim6_pulse_seq_count - 1) {
+        tim6_pulse_seq_active = 0;
+        tim6_pulse_seq_phase = 0;
+      } else {
+        uint32_t gap_ms = tim6_pulse_seq_gap_ms[tim6_pulse_seq_index];
+        tim6_pulse_seq_phase = 2;
+        tim6_pulse_seq_deadline = tim6_tick_ms + gap_ms;
+      }
+    } else if (tim6_pulse_seq_phase == 2) {
+      tim6_pulse_seq_index++;
+      if (tim6_pulse_seq_index >= tim6_pulse_seq_count) {
+        tim6_pulse_seq_active = 0;
+        tim6_pulse_seq_phase = 0;
+      } else {
+        press_button(&hi2c3, (Button_TypeDef)tim6_pulse_seq_button);
+        tim6_pulse_seq_phase = 1;
+        tim6_pulse_seq_deadline = tim6_tick_ms + tim6_pulse_seq_pulse_ms[tim6_pulse_seq_index];
+      }
+    }
+  }
 }
+
+//functions
+// void json_err_handle(json_err_t* err){
+//   if(*err == ERR_NONE){
+//     return;
+//   }
+//   char err_code[20];
+//   strcpy(err_code, json_err_to_code(*err));
+//   max3485_transmit(&hmax3485_2, (uint8_t*)err_code, strlen(err_code), HAL_MAX_DELAY);
+// }
 
 //void handle_monitors_config();
 //void handle_relay_set();
@@ -635,12 +688,14 @@ void StartRS485CmdTask(void *argument)
       jsmn_parser parser;
       jsmntok_t tokens[TOKENS_NUM];
       json_err_t error = ERR_NONE;
+      uint32_t seq_num = 0;
       char cmd[32];
       jsmn_init(&parser);
       ret = jsmn_parse(&parser, (const char *)rx_buffer, strlen((const char *)rx_buffer), tokens, TOKENS_NUM);
       if(ret < 0){
         error = ERR_JSON_PARSE;
       } else {
+        seq_num = find_seq_number(tokens, ret);
         for(uint8_t i = 1; i < ret; i++) {
           if(tokens[i].type == JSMN_STRING){
             // kiểm tra nếu token là "cmd"
@@ -654,7 +709,7 @@ void StartRS485CmdTask(void *argument)
         json_cmd_t num;
         num = json_cmd_from_str(cmd);
         switch(num) {
-          case CMD_UNKNOWN:
+          default:
             error = ERR_INVALID_CMD;
             break;
           case CMD_MONITOR_CONFIG: {
@@ -672,7 +727,6 @@ void StartRS485CmdTask(void *argument)
             if(error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
-              release_button(&hi2c3, button1);
             }
             break;
           case CMD_READ_SNAPSHOT:
@@ -705,20 +759,41 @@ void StartRS485CmdTask(void *argument)
             if(error == ERR_NONE) {
               max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
               memset(response, 0, sizeof(response));
-              press_button(&hi2c3, button1);
             }
             break;
           case CMD_RELAY_SET:
+            monitors_set_json((const char*)rx_buffer);
+            error = handle_relay_set(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
           case CMD_RELAY_PULSE:
+            monitors_set_json((const char*)rx_buffer);  
+          error = handle_relay_pulse(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
           case CMD_RELAY_PULSE_SEQ:
+            monitors_set_json((const char*)rx_buffer);  
+            error = handle_relay_pulse_seq(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
           case CMD_RESET:
             break;
         }
       }
-      json_err_handle(&error);
+      // json_err_handle(&error);
+      handle_error(error, seq_num, response, strlen(response));
+      if (error != ERR_NONE) {
+        max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+      }
       error = ERR_NONE;
       memset(rx_buffer, 0, RX_BUFFER_SIZE_MAX);
       rx_index = 0;

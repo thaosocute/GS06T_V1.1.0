@@ -8,6 +8,7 @@ uint16_t input_queue[INPUT_QUEUE_SIZE];
 int queue_head = 0;
 int queue_tail = 0;
 int queue_count = 0;
+uint16_t queue_total_samples = 0;
 
 int events_index = 0;
 int events_count = 0;
@@ -36,13 +37,15 @@ static inline uint16_t queue_get(int i) {
 }
 
 static inline uint8_t get_pin(int sample_idx, uint8_t pin) {
-    return (queue_get(sample_idx) >> pin) & 1;
+    // Input_TypeDef: 1..16, bit position trong queue là 0..15
+    if (pin == 0 || pin > 16) return 0;
+    return (queue_get(sample_idx) >> (pin - 1)) & 1;
 }
 
 /* đếm số samples cần dùng theo observe_ms */
-static inline uint8_t samples_for(uint32_t observe_ms) {
-    uint32_t n = observe_ms / SAMPLE_RATE_MS;
-    return (uint8_t)(n > INPUT_QUEUE_SIZE ? INPUT_QUEUE_SIZE : n);
+static inline uint16_t samples_for(uint32_t observe_ms) {
+    uint16_t n = observe_ms / SAMPLE_RATE_MS;
+    return n;
 }
 
 static PinAnalysis analyze_pin(uint8_t n_samples, uint8_t pin) {
@@ -52,6 +55,7 @@ static PinAnalysis analyze_pin(uint8_t n_samples, uint8_t pin) {
     if (n_samples > queue_count)
         n_samples = queue_count;
 
+    // phân tích xung
     for (uint8_t i = 0; i < n_samples; i++) {
         uint8_t val = get_pin(i, pin);
         if (val) a.high_count++;
@@ -59,6 +63,8 @@ static PinAnalysis analyze_pin(uint8_t n_samples, uint8_t pin) {
         if (i > 0 && val != get_pin(i - 1, pin))
             a.transitions++;
     }
+
+    a.pulse_num = a.transitions/2;
 
     uint32_t total = a.high_count + a.low_count;
     if (total == 0) return a;
@@ -105,18 +111,43 @@ static json_monitor_state_t infer_from_analysis(MonitorType type, PinAnalysis *a
         a->confident = abs(freq - 0.25f)/0.05f;
         return BLINK_0_25HZ;
     }
-    if (freq >= 0.010f && freq <= 0.021f) {
-        a->confident = abs(freq - 0.015f)/0.05f;
-        return BLINK_1_PER_MIN;
-    }  // ~1/60 Hz
-    if (freq >= 0.022f && freq <= 0.045f) {
-        a->confident = abs(freq - 0.034f)/0.01f;
-        return BLINK_2_PER_MIN;
-    }  // ~2/60 Hz
-    if (freq >= 0.045f && freq <= 0.055f) {
-        a->confident = abs(freq - 0.04f)/0.005f;
-        return BLINK_3_PER_MIN;
-    }  // ~3/60 Hz
+
+    if(a->pulse_num == 1) {
+        switch(type){
+            case MON_LED:
+                return BLINK_1_PER_MIN;
+            case MON_LED_MULTICOLOR:
+                return BLINK_1_PER_MIN;
+            case MON_BUZZER:
+                return BEEP_ONCE;
+            case MON_RELAY:
+                return UNKNOWN;
+        }
+    }
+    if(a->pulse_num == 2) {
+        switch(type){
+            case MON_LED:
+                return BLINK_2_PER_MIN;
+            case MON_LED_MULTICOLOR:
+                return BLINK_2_PER_MIN;
+            case MON_BUZZER:
+                return UNKNOWN;
+            case MON_RELAY:
+                return UNKNOWN;
+        }
+    }
+    if(a->pulse_num == 3) {
+        switch(type){
+            case MON_LED:
+                return BLINK_3_PER_MIN;
+            case MON_LED_MULTICOLOR:
+                return BLINK_3_PER_MIN;
+            case MON_BUZZER:
+                return UNKNOWN;
+            case MON_RELAY:
+                return UNKNOWN;
+        }
+    }
 
     return UNKNOWN;
 }
@@ -128,6 +159,7 @@ void push_input(uint16_t val) {
     } else {
         queue_tail = (queue_tail + 1) % INPUT_QUEUE_SIZE;
     }
+    queue_total_samples++;
 }
 
 static uint8_t is_stable(uint8_t pin, uint8_t debounce_samples) {
@@ -141,11 +173,11 @@ static uint8_t is_stable(uint8_t pin, uint8_t debounce_samples) {
 
 void update_monitor_state(Monitor *monitor) {
     json_monitor_state_t prev_state = monitor->state;
-    uint8_t n = samples_for(monitor->timing.observe_ms);
-    uint8_t debounce_n = samples_for(monitor->timing.debounce_ms);
+    uint16_t n = samples_for(monitor->timing.observe_ms);
+    uint16_t debounce_n = samples_for(monitor->timing.debounce_ms);
 
     /* nếu chưa đủ samples cho observe, set DETECTING */
-    if (queue_count < n) {
+    if (queue_total_samples < n) {
         monitor->state = DETECTING;
         return;
     }
@@ -182,24 +214,62 @@ void update_monitor_state(Monitor *monitor) {
                     /* kết hợp: nếu tất cả tĩnh, suy màu; nếu có động, suy BLINK */
                     uint8_t has_blink = (a_r.transitions > 0) || (a_g.transitions > 0) || (a_b.transitions > 0) || (a_o.transitions > 0);
                     if (!has_blink) {
-                        // tĩnh
+                        // tĩnh, chỉ 1 led tại 1 thời điểm
                         uint8_t r = a_r.duty_cycle >= 0.99f;
                         uint8_t g = a_g.duty_cycle >= 0.99f;
                         uint8_t b = a_b.duty_cycle >= 0.99f;
                         uint8_t o = a_o.duty_cycle >= 0.99f;
-                        if (r && g && b) monitor->state = ON_PURPLE;  // giả sử
-                        else if (r && b) monitor->state = ON_PURPLE;
-                        else if (r && o) monitor->state = ON_ORANGE;
-                        else if (b) monitor->state = ON_BLUE;
-                        else if (r) monitor->state = ON;  // RED
-                        else monitor->state = OFF;
+                        uint8_t active = r + g + b + o;
+                        if (active != 1) {
+                            monitor->state = UNKNOWN;
+                        } else if (r) {
+                            monitor->state = ON;
+                        } else if (g) {
+                            monitor->state = ON;  // no dedicated green code, using ON
+                        } else if (b) {
+                            monitor->state = ON_BLUE;
+                        } else if (o) {
+                            monitor->state = ON_ORANGE;
+                        } else {
+                            monitor->state = OFF;
+                        }
                     } else {
-                        // động, suy từ freq trung bình
-                        float avg_freq = (a_r.freq_hz + a_g.freq_hz + a_b.freq_hz + a_o.freq_hz) / 4.0f;
-                        json_monitor_state_t blink = infer_from_analysis(MON_LED_MULTICOLOR, &(PinAnalysis){0,0,0,0.0f,avg_freq});
-                        // map sang BLINK_*
-                        if (blink == BLINK_1HZ) monitor->state = BLINK_BLUE_1HZ;  // giả sử
-                        else monitor->state = UNKNOWN;
+                        // động, chỉ 1 led hoạt động tại 1 thời điểm
+                        uint8_t blinking_pins = 0;
+                        if (a_r.transitions > 0) blinking_pins++;
+                        if (a_g.transitions > 0) blinking_pins++;
+                        if (a_b.transitions > 0) blinking_pins++;
+                        if (a_o.transitions > 0) blinking_pins++;
+                        if (blinking_pins != 1) {
+                            monitor->state = UNKNOWN;
+                        } else {
+                            PinAnalysis *active_a = NULL;
+                            if (a_r.transitions > 0) active_a = &a_r;
+                            else if (a_b.transitions > 0) active_a = &a_b;
+                            else if (a_o.transitions > 0) active_a = &a_o;
+                            else if (a_g.transitions > 0) active_a = &a_g;
+                            if (active_a) {
+                                json_monitor_state_t blink = infer_from_analysis(MON_LED_MULTICOLOR, active_a);
+                                if (active_a == &a_r) {
+                                    if (blink == BLINK_1HZ) monitor->state = BLINK_RED_1HZ;
+                                    else if (blink == BLINK_5HZ) monitor->state = BLINK_RED_5HZ;
+                                    else monitor->state = UNKNOWN;
+                                } else if (active_a == &a_b) {
+                                    if (blink == BLINK_1HZ) monitor->state = BLINK_BLUE_1HZ;
+                                    else if (blink == BLINK_5HZ) monitor->state = BLINK_BLUE_5HZ;
+                                    else if (blink == BLINK_0_25HZ) monitor->state = BLINK_BLUE_0_25HZ;
+                                    else monitor->state = UNKNOWN;
+                                } else if (active_a == &a_o) {
+                                    if (blink == BLINK_1HZ) monitor->state = BLINK_ORANGE_1HZ;
+                                    else if (blink == BLINK_5HZ) monitor->state = BLINK_ORANGE_5HZ;
+                                    else monitor->state = UNKNOWN;
+                                } else {
+                                    monitor->state = UNKNOWN;
+                                }
+                            } else {
+                                monitor->state = UNKNOWN;
+                            }
+                        }
                     }
                     break;
                 }
@@ -214,11 +284,20 @@ void update_monitor_state(Monitor *monitor) {
                         uint8_t g = get_pin(0, monitor->cfg.led_mc.pin_g);
                         uint8_t b = get_pin(0, monitor->cfg.led_mc.pin_b);
                         uint8_t o = get_pin(0, monitor->cfg.led_mc.pin_orange);
-                        if (r && b) monitor->state = ON_PURPLE;
-                        else if (r && o) monitor->state = ON_ORANGE;
-                        else if (b) monitor->state = ON_BLUE;
-                        else if (r) monitor->state = ON;  // RED
-                        else monitor->state = OFF;
+                        uint8_t active = r + g + b + o;
+                        if (active != 1) {
+                            monitor->state = UNKNOWN;
+                        } else if (r) {
+                            monitor->state = ON;
+                        } else if (g) {
+                            monitor->state = ON; // no dedicated green code
+                        } else if (b) {
+                            monitor->state = ON_BLUE;
+                        } else if (o) {
+                            monitor->state = ON_ORANGE;
+                        } else {
+                            monitor->state = OFF;
+                        }
                     }
                     break;
                 }

@@ -4,10 +4,13 @@
 #include "main.h"
 #include "jsmn.h"
 #include "json_cmd.h"
+#include "output.h"
+#include "input_output.h"
 #include <stdint.h>
 #include <stddef.h>
 
 #define MONITORS_NUM_MAX 16
+#define RELAY_PULSE_SEQ_MAX_STEPS 10
 
 /* ── Enums ─────────────────────────────────────────────── */
 
@@ -31,22 +34,22 @@ typedef enum {
 /* ── Config theo từng loại ─────────────────────────────── */
 
 typedef struct {
-    uint8_t pin;
+    Input_TypeDef pin;
 } LedConfig;
 
 typedef struct {
-    uint8_t pin_r;
-    uint8_t pin_b;
-    uint8_t pin_orange;   /* chỉ O2 dùng, còn lại = 0 */
-    uint8_t pin_g;
+    Input_TypeDef pin_r;
+    Input_TypeDef pin_b;
+    Input_TypeDef pin_orange;   /* chỉ O2 dùng, còn lại = 0 */
+    Input_TypeDef pin_g;
 } LedMcConfig;
 
 typedef struct {
-    uint8_t pin;
+    Input_TypeDef pin;
 } BuzzerConfig;
 
 typedef struct {
-    uint8_t     pin;
+    Input_TypeDef     pin;
     ActiveState active_state;
 } RelayConfig;
 
@@ -88,6 +91,9 @@ typedef struct {
 /// The token array passed to handlers must refer to this buffer.
 void monitors_set_json(const char *json_str);
 void monitor_set_state_event();
+uint32_t find_seq_number(jsmntok_t *tokens, int token_count);
+
+void handle_error(json_err_t error, uint32_t seq, char *response, size_t response_size);
 
 json_err_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 json_err_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
@@ -95,5 +101,8 @@ json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *respons
 json_err_t handle_read_snapshot(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 json_err_t handle_poll(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 json_err_t handle_flush_events(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
+json_err_t handle_relay_set(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
+json_err_t handle_relay_pulse(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
+json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 
 #endif //MONITOR_CONFIG_H

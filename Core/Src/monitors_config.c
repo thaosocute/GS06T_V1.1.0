@@ -1,17 +1,39 @@
 #include "monitors_config.h"
 #include "input.h"
-#include "json_cmd.h"
 #include <string.h>
 #include <stdlib.h>  // for strtol
 #include <stdio.h>   // for snprintf
+
+static inline Input_TypeDef sanitize_input_pin(uint64_t val) {
+    if (val >= 1 && val <= 16) {
+        return (Input_TypeDef)val;
+    }
+    return 0;  // 0 nghĩa chưa gán/unassigned
+}
 
 Monitor monitors_arr[MONITORS_NUM_MAX];
 
 static const char *g_json_str = NULL;
 
+char error_reason[32];
+
 extern monitor_event_t monitors_event[EVENTS_HISTORY_MAX];
 extern int events_index;
 extern int events_count;
+
+extern I2C_HandleTypeDef hi2c3;
+extern volatile uint32_t tim6_tick_ms;
+extern volatile uint8_t tim6_pulse_active;
+extern volatile uint8_t tim6_pulse_button;
+extern volatile uint32_t tim6_pulse_end_tick;
+extern volatile uint8_t tim6_pulse_seq_active;
+extern volatile uint8_t tim6_pulse_seq_button;
+extern volatile uint8_t tim6_pulse_seq_phase;
+extern volatile uint8_t tim6_pulse_seq_index;
+extern volatile uint8_t tim6_pulse_seq_count;
+extern volatile uint32_t tim6_pulse_seq_deadline;
+extern volatile uint32_t tim6_pulse_seq_pulse_ms[RELAY_PULSE_SEQ_MAX_STEPS];
+extern volatile uint32_t tim6_pulse_seq_gap_ms[RELAY_PULSE_SEQ_MAX_STEPS];
 
 void monitors_set_json(const char *json_str) {
     g_json_str = json_str;
@@ -23,7 +45,7 @@ void monitor_set_state_event() {
     }
 }
 
-static uint32_t find_seq_number(jsmntok_t *tokens, int token_count) {
+uint32_t find_seq_number(jsmntok_t *tokens, int token_count) {
     uint32_t seq = 0;
     for (int i = 1; i < token_count; i++) {
         if (jsoneq(g_json_str, &tokens[i], "seq") == 0) {
@@ -35,7 +57,7 @@ static uint32_t find_seq_number(jsmntok_t *tokens, int token_count) {
     return seq;
 }
 
-static const char* monitor_type_to_str(MonitorType type) {
+static char* monitor_type_to_str(MonitorType type) {
     switch (type) {
         case MON_LED: return "led";
         case MON_LED_MULTICOLOR: return "led_multicolor";
@@ -43,6 +65,33 @@ static const char* monitor_type_to_str(MonitorType type) {
         case MON_RELAY: return "relay";
         default: return "unknown";
     }
+}
+
+static uint8_t relay_name_to_button(const char *relay_id, Button_TypeDef *button) {
+    if (!relay_id || !button) return 0;
+
+    if (strcmp(relay_id, "RL1") == 0) { *button = RL1; return 1; }
+    if (strcmp(relay_id, "RL2") == 0) { *button = RL2; return 1; }
+    if (strcmp(relay_id, "RL3") == 0) { *button = RL3; return 1; }
+    if (strcmp(relay_id, "RL4") == 0) { *button = RL4; return 1; }
+    if (strcmp(relay_id, "RL5") == 0) { *button = RL5; return 1; }
+    if (strcmp(relay_id, "RL6") == 0) { *button = RL6; return 1; }
+    if (strcmp(relay_id, "RL7") == 0) { *button = RL7; return 1; }
+    if (strcmp(relay_id, "RL8") == 0) { *button = RL8; return 1; }
+    if (strcmp(relay_id, "RL9") == 0) { *button = RL9; return 1; }
+    if (strcmp(relay_id, "RL10") == 0) { *button = RL10; return 1; }
+    if (strcmp(relay_id, "RL11") == 0) { *button = RL11; return 1; }
+    if (strcmp(relay_id, "RL12") == 0) { *button = RL12; return 1; }
+    if (strcmp(relay_id, "RL13") == 0) { *button = RL13; return 1; }
+    if (strcmp(relay_id, "RL14") == 0) { *button = RL14; return 1; }
+    if (strcmp(relay_id, "BR1") == 0) { *button = BR1; return 1; }
+    if (strcmp(relay_id, "BR2") == 0) { *button = BR2; return 1; }
+    if (strcmp(relay_id, "BR3") == 0) { *button = BR3; return 1; }
+    if (strcmp(relay_id, "BR4") == 0) { *button = BR4; return 1; }
+    if (strcmp(relay_id, "BR5") == 0) { *button = BR5; return 1; }
+    if (strcmp(relay_id, "BR6") == 0) { *button = BR6; return 1; }
+
+    return 0;
 }
 
 static int get_latest_event(monitor_event_t *events_arr, char *buf, size_t buf_size) {
@@ -143,6 +192,65 @@ fail:
     snprintf(out_buf, out_buf_size, "[]");
 }
 
+void handle_error(json_err_t error, uint32_t seq, char *response, size_t response_size) {
+    if(error == ERR_NONE){
+        return;
+    }
+    char err_code[20];
+    strcpy(err_code, json_err_to_code(error));
+
+    // tạo message string
+    char *msg_string = (char *)malloc(64);
+    if(error == ERR_INVALID_CMD){ 
+        snprintf(msg_string, 64, "command %s invalid", error_reason);
+        memset(error_reason, 0, sizeof(error_reason));
+    }
+    if(error == ERR_INVALID_ID) {
+        snprintf(msg_string, 64, "%s not found", error_reason);
+        memset(error_reason, 0, sizeof(error_reason));
+    }
+    if(error == ERR_INVALID_DATA) {
+        snprintf(msg_string, 64, "%s not found or wrong data", error_reason);
+        memset(error_reason, 0, sizeof(error_reason));
+    }
+    if(error == ERR_JSON_PARSE) {
+        snprintf(msg_string, 64, "Unexpected symbol");
+    }
+    if(error == ERR_PULSE_RANGE) {
+        snprintf(msg_string, 64, "pulse_ms %s out of range [10,5000]", error_reason);
+        memset(error_reason, 0, sizeof(error_reason));
+    }
+    if(error == ERR_BUSY) {
+        snprintf(msg_string, 64, "%s busy", error_reason);
+        memset(error_reason, 0, sizeof(error_reason));
+    }
+    if(error == ERR_HW_FAULT) {
+        snprintf(msg_string, 64, "hardware fault");
+        memset(error_reason, 0, sizeof(error_reason));
+    }
+
+    // lấy các sự kiện (events)
+    int events_to_take = events_count;
+    if (events_to_take > 5) events_to_take = 5;
+
+    size_t events_buf_size = 32 + (size_t)events_to_take * 140;
+    if (events_buf_size < 128) events_buf_size = 128;
+    char *events_buf = (char *)malloc(events_buf_size);
+    if (!events_buf) {
+        return;
+    }
+    build_events_json(events_buf, events_buf_size, events_to_take);
+
+    int pending_events = events_count;
+
+    // tạo response
+    snprintf(response, response_size, "{\"cmd\":\"error\",\"seq\":%ld,\"data\":{\"code\":\"%s\",\"msg\":\"%s\"},\"events\":%s,\"pending\":%d}", 
+        seq, err_code, msg_string, events_buf, pending_events);
+    
+    free(events_buf);
+    free(msg_string);
+}
+
 json_err_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
     if (!g_json_str || !tokens || token_count <= 0) {
         return ERR_JSON_PARSE;
@@ -164,7 +272,8 @@ json_err_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *resp
     }
 
     if(!found) {
-        return ERR_INVALID_CMD;
+        snprintf(error_reason, 16, "seq");
+        return ERR_INVALID_DATA;
     } 
     // Tìm key "monitors"
     int monitors_idx = -1;
@@ -175,8 +284,8 @@ json_err_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *resp
         }
     }
     if (monitors_idx == -1) {
-        //snprintf(response, response_size, "{\"cmd\":\"error\",\"seq\":%u,\"data\":null,\"events\":[],\"pending\":0}", seq);
-        return ERR_INVALID_CMD;
+        snprintf(error_reason, 16, "monitors");
+        return ERR_INVALID_DATA;
     }
 
     int arr_size = tokens[monitors_idx].size;
@@ -221,25 +330,25 @@ json_err_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *resp
             } else if (jsoneq(g_json_str, &tokens[key_idx], "pin") == 0) {
                 uint64_t val;
                 json_parse_uint64(g_json_str, &tokens[val_idx], &val);
-                if (mon->type == MON_LED) mon->cfg.led.pin = (uint8_t)val;
-                else if (mon->type == MON_BUZZER) mon->cfg.buzzer.pin = (uint8_t)val;
-                else if (mon->type == MON_RELAY) mon->cfg.relay.pin = (uint8_t)val;
+                if (mon->type == MON_LED) mon->cfg.led.pin = sanitize_input_pin(val);
+                else if (mon->type == MON_BUZZER) mon->cfg.buzzer.pin = sanitize_input_pin(val);
+                else if (mon->type == MON_RELAY) mon->cfg.relay.pin = sanitize_input_pin(val);
             } else if (jsoneq(g_json_str, &tokens[key_idx], "pin_r") == 0) {
                 uint64_t val;
                 json_parse_uint64(g_json_str, &tokens[val_idx], &val);
-                mon->cfg.led_mc.pin_r = (uint8_t)val;
+                mon->cfg.led_mc.pin_r = sanitize_input_pin(val);
             } else if (jsoneq(g_json_str, &tokens[key_idx], "pin_g") == 0) {
                 uint64_t val;
                 json_parse_uint64(g_json_str, &tokens[val_idx], &val);
-                mon->cfg.led_mc.pin_g = (uint8_t)val;
+                mon->cfg.led_mc.pin_g = sanitize_input_pin(val);
             } else if (jsoneq(g_json_str, &tokens[key_idx], "pin_b") == 0) {
                 uint64_t val;
                 json_parse_uint64(g_json_str, &tokens[val_idx], &val);
-                mon->cfg.led_mc.pin_b = (uint8_t)val;
+                mon->cfg.led_mc.pin_b = sanitize_input_pin(val);
             } else if (jsoneq(g_json_str, &tokens[key_idx], "pin_orange") == 0) {
                 uint64_t val;
                 json_parse_uint64(g_json_str, &tokens[val_idx], &val);
-                mon->cfg.led_mc.pin_orange = (uint8_t)val;
+                mon->cfg.led_mc.pin_orange = sanitize_input_pin(val);
             } else if (jsoneq(g_json_str, &tokens[key_idx], "active_state") == 0) {
                 char state_str[10];
                 json_parse_string(g_json_str, &tokens[val_idx], state_str);
@@ -259,38 +368,26 @@ json_err_t handle_monitors_config(jsmntok_t *tokens, int token_count, char *resp
 
 json_err_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
     if (!g_json_str || !tokens || token_count <= 0) {
-        return ERR_INVALID_CMD;
+        return ERR_JSON_PARSE;
     }
 
     int r = token_count;
 
     // Tìm "seq"
+    uint8_t found = 0;
     uint32_t seq = 0;
-    uint32_t pending = 0;
-    const char *events_str = "[]";
-    char events_buf[128] = {0};
-
     for (int i = 1; i < r; i++) {
         if (jsoneq(g_json_str, &tokens[i], "seq") == 0 && (i + 1) < r) {
             uint64_t val;
             if (json_parse_uint64(g_json_str, &tokens[i + 1], &val)) {
                 seq = (uint32_t)val;
+                found = 1;
             }
-        } else if (jsoneq(g_json_str, &tokens[i], "pending") == 0 && (i + 1) < r) {
-            uint64_t val;
-            if (json_parse_uint64(g_json_str, &tokens[i + 1], &val)) {
-                pending = (uint32_t)val;
-            }
-        } else if (jsoneq(g_json_str, &tokens[i], "events") == 0 && (i + 1) < r) {
-            int start = tokens[i + 1].start;
-            int end = tokens[i + 1].end;
-            int len = end - start;
-            if (len > 0 && len < (int)sizeof(events_buf)) {
-                memcpy(events_buf, g_json_str + start, len);
-                events_buf[len] = '\0';
-                events_str = events_buf;
-            }
-        }
+        } 
+    }
+    if(!found) {
+        snprintf(error_reason, 32, "seq");
+        return ERR_INVALID_DATA;
     }
 
     // count configured monitors (non-empty id signifies an entry)
@@ -303,10 +400,24 @@ json_err_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_
 
     uint32_t uptime_ms = HAL_GetTick();
 
-    snprintf(response, response_size,
-             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"uptime_ms\":%lu,\"fw_version\":\"%s\",\"num_monitors\":%d},\"events\":%s,\"pending\":%lu}",
-             seq, uptime_ms, FIRMWARE_VERSION, num_monitors, events_str, pending);
+    // lấy các sự kiện (events)
+    int events_to_take = events_count;
+    if (events_to_take > 5) events_to_take = 5;
 
+    size_t events_buf_size = 32 + (size_t)events_to_take * 140;
+    if (events_buf_size < 128) events_buf_size = 128;
+    char *events_buf = malloc(events_buf_size);
+    if (!events_buf) {
+        return ERR_INVALID_CMD;
+    }
+    build_events_json(events_buf, events_buf_size, events_to_take);
+
+    int pending_events = events_count;
+
+    snprintf(response, response_size,
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"uptime_ms\":%lu,\"fw_version\":\"%s\",\"num_monitors\":%d},\"events\":%s,\"pending\":%d}",
+             seq, uptime_ms, FIRMWARE_VERSION, num_monitors, events_buf, pending_events);
+    free(events_buf);
     return ERR_NONE;
 }
 
@@ -322,7 +433,7 @@ static float get_confidence(json_monitor_state_t state) {
 
 json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
     if (!g_json_str || !tokens || token_count <= 0) {
-        return ERR_INVALID_CMD;
+        return ERR_JSON_PARSE;
     }
     int r = token_count;
 
@@ -346,7 +457,7 @@ json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *respons
         }
     }
     if (data_idx == -1) {
-        return ERR_INVALID_CMD;
+        return ERR_INVALID_DATA;
     }
 
     // Trong data, tìm "ids"
@@ -363,7 +474,7 @@ json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *respons
         }
     }
     if (ids_idx == -1) {
-        return ERR_INVALID_CMD;
+        return ERR_INVALID_DATA;
     }
 
     int ids_size = tokens[ids_idx].size;
@@ -553,7 +664,7 @@ json_err_t handle_poll(jsmntok_t *tokens, int token_count, char *response, size_
     int pending_events = events_count;
     snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%ld,\"data\":{\"queue_depth\":%d},\"events\":%s,\"pending\":%d}\r\n", 
             seq, queue_depth, events_buf, pending_events);
-    
+    free(events_buf);
     return ERR_NONE;
 }
 
@@ -580,5 +691,274 @@ json_err_t handle_flush_events(jsmntok_t *tokens, int token_count, char *respons
     int pending_events = events_count;
     snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%ld,\"data\":null,\"events\":%s,\"pending\":%d}\r\n", 
             seq, events_buf, pending_events);
+    free(events_buf);
+    return ERR_NONE;
+}
+
+json_err_t handle_relay_set(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
+    if (!g_json_str || !tokens || token_count <= 0) {
+        return ERR_INVALID_CMD;
+    }
+
+    uint32_t seq = find_seq_number(tokens, token_count);
+
+    // Tìm "data"
+    int data_idx = -1;
+    for (int i = 1; i < token_count; i++) {
+        if (jsoneq(g_json_str, &tokens[i], "data") == 0 && tokens[i+1].type == JSMN_OBJECT) {
+            data_idx = i + 1;
+            break;
+        }
+    }
+    if (data_idx == -1) {
+        return ERR_INVALID_CMD;
+    }
+
+    // Trong data, tìm relay_id và state
+    int relay_id_idx = -1;
+    int state_idx = -1;
+    int data_size = tokens[data_idx].size;
+    int data_start = data_idx + 1;
+    for (int k = 0; k < data_size; k++) {
+        int key_idx = data_start + k * 2;
+        int val_idx = data_start + k * 2 + 1;
+        if (key_idx >= token_count || val_idx >= token_count) break;
+
+        if (jsoneq(g_json_str, &tokens[key_idx], "relay_id") == 0 && tokens[val_idx].type == JSMN_STRING) {
+            relay_id_idx = val_idx;
+        } else if (jsoneq(g_json_str, &tokens[key_idx], "state") == 0 && tokens[val_idx].type == JSMN_PRIMITIVE) {
+            state_idx = val_idx;
+        }
+    }
+
+    if (relay_id_idx == -1 || state_idx == -1) {
+        return ERR_INVALID_CMD;
+    }
+
+    char relay_id[32] = {0};
+    json_parse_string(g_json_str, &tokens[relay_id_idx], relay_id);
+
+    int state_len = tokens[state_idx].end - tokens[state_idx].start;
+    const char *state_ptr = g_json_str + tokens[state_idx].start;
+    uint8_t relay_on;
+    if (state_len == 4 && strncmp(state_ptr, "true", 4) == 0) {
+        relay_on = 1;
+    } else if (state_len == 5 && strncmp(state_ptr, "false", 5) == 0) {
+        relay_on = 0;
+    } else {
+        return ERR_INVALID_DATA;
+    }
+
+    Button_TypeDef button;
+    if (relay_name_to_button(relay_id, &button)) {
+        if (relay_on) {
+            press_button(&hi2c3, button);
+        } else {
+            release_button(&hi2c3, button);
+        }
+    } else {
+        return ERR_INVALID_DATA;
+    }
+
+    snprintf(response, response_size,
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":[],\"pending\":0}",
+             (unsigned long)seq);
+
+    return ERR_NONE;
+}
+
+json_err_t handle_relay_pulse(jsmntok_t *tokens, int token_count, char *response, size_t response_size){
+    if (!g_json_str || !tokens || token_count <= 0) {
+        return ERR_INVALID_CMD;
+    }
+    uint32_t seq = find_seq_number(tokens, token_count);
+
+    // Tìm "data"
+    int data_idx = -1;
+    for (int i = 1; i < token_count; i++) {
+        if (jsoneq(g_json_str, &tokens[i], "data") == 0 && tokens[i+1].type == JSMN_OBJECT) {
+            data_idx = i + 1;
+            break;
+        }
+    }
+    if (data_idx == -1) {
+        return ERR_INVALID_CMD;
+    }
+
+    // Trong data, tìm relay_id và pulse_ms
+    int relay_id_idx = -1;
+    int pulse_ms_idx = -1;
+    int data_size = tokens[data_idx].size;
+    int data_start = data_idx + 1;
+    for (int k = 0; k < data_size; k++) {
+        int key_idx = data_start + k * 2;
+        int val_idx = data_start + k * 2 + 1;
+        if (key_idx >= token_count || val_idx >= token_count) break;
+
+        if (jsoneq(g_json_str, &tokens[key_idx], "relay_id") == 0 && tokens[val_idx].type == JSMN_STRING) {
+            relay_id_idx = val_idx;
+        } else if (jsoneq(g_json_str, &tokens[key_idx], "pulse_ms") == 0 && tokens[val_idx].type == JSMN_PRIMITIVE) {
+            pulse_ms_idx = val_idx;
+        }
+    }
+
+    if (relay_id_idx == -1 || pulse_ms_idx == -1) {
+        return ERR_INVALID_CMD;
+    }
+
+    char relay_id[32] = {0};
+    json_parse_string(g_json_str, &tokens[relay_id_idx], relay_id);
+
+    uint64_t pulse_ms_u64 = 0;
+    if (!json_parse_uint64(g_json_str, &tokens[pulse_ms_idx], &pulse_ms_u64)) {
+        return ERR_INVALID_DATA;
+    }
+    if (pulse_ms_u64 == 0 || pulse_ms_u64 > 60000U) {
+        return ERR_PULSE_RANGE;
+    }
+    uint32_t pulse_ms = (uint32_t)pulse_ms_u64;
+
+    Button_TypeDef button;
+    relay_name_to_button(relay_id, &button);
+
+    __disable_irq();
+    if (tim6_pulse_active) {
+        __enable_irq();
+        return ERR_BUSY;
+    }
+
+    press_button(&hi2c3, button);
+    tim6_pulse_button = (uint8_t)button;
+    tim6_pulse_end_tick = tim6_tick_ms + pulse_ms;
+    tim6_pulse_active = 1;
+    __enable_irq();
+
+    snprintf(response, response_size,
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":[],\"pending\":0}",
+             (unsigned long)seq);
+
+    return ERR_NONE;
+}
+
+json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *response, size_t response_size){
+    if (!g_json_str || !tokens || token_count <= 0) {
+        return ERR_INVALID_CMD;
+    }
+
+    uint32_t seq = find_seq_number(tokens, token_count);
+
+    // Tìm "data"
+    int data_idx = -1;
+    for (int i = 1; i < token_count; i++) {
+        if (jsoneq(g_json_str, &tokens[i], "data") == 0 && tokens[i+1].type == JSMN_OBJECT) {
+            data_idx = i + 1;
+            break;
+        }
+    }
+    if (data_idx == -1) {
+        return ERR_INVALID_CMD;
+    }
+
+    int relay_id_idx = -1;
+    int sequence_idx = -1;
+    int data_size = tokens[data_idx].size;
+    int data_start = data_idx + 1;
+    for (int k = 0; k < data_size; k++) {
+        int key_idx = data_start + k * 2;
+        int val_idx = data_start + k * 2 + 1;
+        if (key_idx >= token_count || val_idx >= token_count) break;
+
+        if (jsoneq(g_json_str, &tokens[key_idx], "relay_id") == 0 && tokens[val_idx].type == JSMN_STRING) {
+            relay_id_idx = val_idx;
+        } else if (jsoneq(g_json_str, &tokens[key_idx], "sequence") == 0 && tokens[val_idx].type == JSMN_ARRAY) {
+            sequence_idx = val_idx;
+        }
+    }
+
+    if (relay_id_idx == -1 || sequence_idx == -1) {
+        return ERR_INVALID_CMD;
+    }
+
+    char relay_id[32] = {0};
+    json_parse_string(g_json_str, &tokens[relay_id_idx], relay_id);
+
+    Button_TypeDef button;
+    relay_name_to_button(relay_id, &button);
+
+    int seq_count = tokens[sequence_idx].size;
+    if (seq_count <= 0) {
+        return ERR_INVALID_DATA;
+    }
+    if (seq_count > RELAY_PULSE_SEQ_MAX_STEPS) {
+        return ERR_PULSE_RANGE;
+    }
+
+    uint32_t pulse_list[RELAY_PULSE_SEQ_MAX_STEPS] = {0};
+    uint32_t gap_list[RELAY_PULSE_SEQ_MAX_STEPS] = {0};
+
+    int current = sequence_idx + 1;
+    for (int s = 0; s < seq_count; s++) {
+        if (current >= token_count || tokens[current].type != JSMN_OBJECT) {
+            return ERR_INVALID_DATA;
+        }
+
+        int obj_size = tokens[current].size;
+        int obj_start = current + 1;
+        uint8_t has_pulse = 0;
+        uint8_t has_gap = 0;
+
+        for (int k = 0; k < obj_size; k++) {
+            int key_idx = obj_start + k * 2;
+            int val_idx = obj_start + k * 2 + 1;
+            if (key_idx >= token_count || val_idx >= token_count) break;
+
+            if (jsoneq(g_json_str, &tokens[key_idx], "pulse_ms") == 0 && tokens[val_idx].type == JSMN_PRIMITIVE) {
+                uint64_t v = 0;
+                if (!json_parse_uint64(g_json_str, &tokens[val_idx], &v) || v == 0 || v > 60000U) {
+                    return ERR_PULSE_RANGE;
+                }
+                pulse_list[s] = (uint32_t)v;
+                has_pulse = 1;
+            } else if (jsoneq(g_json_str, &tokens[key_idx], "gap_ms") == 0 && tokens[val_idx].type == JSMN_PRIMITIVE) {
+                uint64_t v = 0;
+                if (!json_parse_uint64(g_json_str, &tokens[val_idx], &v) || v > 60000U) {
+                    return ERR_PULSE_RANGE;
+                }
+                gap_list[s] = (uint32_t)v;
+                has_gap = 1;
+            }
+        }
+
+        if (!has_pulse || !has_gap) {
+            return ERR_INVALID_DATA;
+        }
+
+        current += 1 + obj_size * 2;
+    }
+
+    __disable_irq();
+    if (tim6_pulse_active || tim6_pulse_seq_active) {
+        __enable_irq();
+        return ERR_BUSY;
+    }
+
+    for (int i = 0; i < seq_count; i++) {
+        tim6_pulse_seq_pulse_ms[i] = pulse_list[i];
+        tim6_pulse_seq_gap_ms[i] = gap_list[i];
+    }
+
+    tim6_pulse_seq_button = (uint8_t)button;
+    tim6_pulse_seq_index = 0;
+    tim6_pulse_seq_count = (uint8_t)seq_count;
+    tim6_pulse_seq_phase = 1;
+    tim6_pulse_seq_deadline = tim6_tick_ms + tim6_pulse_seq_pulse_ms[0];
+    tim6_pulse_seq_active = 1;
+    press_button(&hi2c3, button);
+    __enable_irq();
+
+    snprintf(response, response_size,
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":[],\"pending\":0}",
+             (unsigned long)seq);
+
     return ERR_NONE;
 }

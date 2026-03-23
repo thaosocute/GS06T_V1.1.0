@@ -20,6 +20,7 @@ typedef struct {
     uint32_t high_count;    /* số sample đọc được HIGH    */
     uint32_t low_count;     /* số sample đọc được LOW     */
     uint32_t transitions;   /* số lần thay đổi mức        */
+    uint8_t pulse_num;      /* số xung*/
     float    freq_hz;       /* tần số ước tính            */
     float    duty_cycle;    /* tỉ lệ HIGH / tổng          */
     float    confident;
