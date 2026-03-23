@@ -1,0 +1,17 @@
+../Core/Src/monitors_config.c:30:6:monitors_set_json	1
+../Core/Src/monitors_config.c:34:6:monitor_set_state_event	2
+../Core/Src/monitors_config.c:40:17:find_seq_number	3
+../Core/Src/monitors_config.c:52:20:monitor_type_to_str	5
+../Core/Src/monitors_config.c:62:16:relay_name_to_button	23
+../Core/Src/monitors_config.c:89:12:get_latest_event	5
+../Core/Src/monitors_config.c:115:13:build_events_json	18
+../Core/Src/monitors_config.c:187:12:handle_monitors_config	40
+../Core/Src/monitors_config.c:301:12:handle_ping	17
+../Core/Src/monitors_config.c:354:12:state_to_code	1
+../Core/Src/monitors_config.c:358:14:get_confidence	5
+../Core/Src/monitors_config.c:364:12:handle_read_pattern	34
+../Core/Src/monitors_config.c:494:12:handle_read_snapshot	18
+../Core/Src/monitors_config.c:569:12:handle_relay_set	31
+../Core/Src/monitors_config.c:662:12:handle_relay_pulse	29
+../Core/Src/monitors_config.c:753:12:handle_relay_pulse_seq	47
+../Core/Src/monitors_config.c:894:12:handle_poll	7

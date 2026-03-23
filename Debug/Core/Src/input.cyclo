@@ -1,0 +1,9 @@
+../Core/Src/input.c:15:13:add_monitor_event	2
+../Core/Src/input.c:34:24:queue_get	1
+../Core/Src/input.c:38:23:get_pin	1
+../Core/Src/input.c:43:23:samples_for	2
+../Core/Src/input.c:48:20:analyze_pin	8
+../Core/Src/input.c:76:29:infer_from_analysis	20
+../Core/Src/input.c:123:6:push_input	2
+../Core/Src/input.c:133:16:is_stable	5
+../Core/Src/input.c:142:6:update_monitor_state	45

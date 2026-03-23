@@ -1,0 +1,17 @@
+../Core/Src/monitors_config.c:30:6:monitors_set_json	16	static
+../Core/Src/monitors_config.c:34:6:monitor_set_state_event	16	static
+../Core/Src/monitors_config.c:40:17:find_seq_number	32	static
+../Core/Src/monitors_config.c:52:20:monitor_type_to_str	16	static
+../Core/Src/monitors_config.c:62:16:relay_name_to_button	16	static
+../Core/Src/monitors_config.c:89:12:get_latest_event	64	static
+../Core/Src/monitors_config.c:115:13:build_events_json	88	static
+../Core/Src/monitors_config.c:187:12:handle_monitors_config	200	static
+../Core/Src/monitors_config.c:301:12:handle_ping	240	static
+../Core/Src/monitors_config.c:354:12:state_to_code	16	static
+../Core/Src/monitors_config.c:358:14:get_confidence	16	static
+../Core/Src/monitors_config.c:364:12:handle_read_pattern	224	static
+../Core/Src/monitors_config.c:494:12:handle_read_snapshot	128	static
+../Core/Src/monitors_config.c:569:12:handle_relay_set	120	static
+../Core/Src/monitors_config.c:662:12:handle_relay_pulse	128	static,ignoring_inline_asm
+../Core/Src/monitors_config.c:753:12:handle_relay_pulse_seq	248	static,ignoring_inline_asm
+../Core/Src/monitors_config.c:894:12:handle_poll	64	static

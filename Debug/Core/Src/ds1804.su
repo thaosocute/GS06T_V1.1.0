@@ -1,0 +1,7 @@
+../Core/Src/ds1804.c:6:13:delay_us	40	static
+../Core/Src/ds1804.c:43:6:DS1804_reset_to_zero	16	static
+../Core/Src/ds1804.c:49:6:DS1804_Init	40	static
+../Core/Src/ds1804.c:74:6:DS1804_set_direction	16	static
+../Core/Src/ds1804.c:82:6:DS1804_step	32	static
+../Core/Src/ds1804.c:98:6:DS1804_get_position	16	static
+../Core/Src/ds1804.c:102:6:DS1804_set_position	16	static

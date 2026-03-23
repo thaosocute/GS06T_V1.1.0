@@ -1,0 +1,14 @@
+../Core/Src/main.c:157:5:main	8	static
+../Core/Src/main.c:271:6:SystemClock_Config	96	static
+../Core/Src/main.c:326:13:MX_I2C3_Init	8	static
+../Core/Src/main.c:374:13:MX_TIM6_Init	24	static
+../Core/Src/main.c:412:13:MX_USART2_UART_Init	8	static
+../Core/Src/main.c:447:13:MX_USART3_UART_Init	8	static
+../Core/Src/main.c:480:13:MX_DMA_Init	16	static
+../Core/Src/main.c:498:13:MX_GPIO_Init	40	static
+../Core/Src/main.c:604:6:HAL_TIM_PeriodElapsedCallback	24	static
+../Core/Src/main.c:651:6:HAL_UARTEx_RxEventCallback	16	static
+../Core/Src/main.c:660:6:json_err_handle	40	static
+../Core/Src/main.c:683:6:StartRS485CmdTask	3920	static
+../Core/Src/main.c:810:6:StartUpdate_input	24	static
+../Core/Src/main.c:867:6:Error_Handler	4	static,ignoring_inline_asm

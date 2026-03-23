@@ -1,0 +1,3 @@
+../Core/Src/output.c:28:6:press_button	5
+../Core/Src/output.c:39:6:release_button	5
+../Core/Src/output.c:50:6:set_potentiometer	1

@@ -1,0 +1,4 @@
+../Core/Src/json_cmd.c:5:13:json_cmd_to_str	16	static
+../Core/Src/json_cmd.c:22:12:json_cmd_from_str	16	static
+../Core/Src/json_cmd.c:38:13:json_err_to_code	16	static
+../Core/Src/json_cmd.c:52:13:state_to_str	16	static

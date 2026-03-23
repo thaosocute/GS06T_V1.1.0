@@ -1,0 +1,3 @@
+../Core/Src/max3485.c:3:6:max3485_init	1
+../Core/Src/max3485.c:11:6:max3485_transmit	1
+../Core/Src/max3485.c:18:6:max3485_receive	1
