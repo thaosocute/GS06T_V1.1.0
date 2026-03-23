@@ -828,34 +828,34 @@ void StartUpdate_input(void *argument)
     //   release_button(&hi2c3, RL1);
     // }
 
-   uint16_t input_state = 0;
-   input_state |= (HAL_GPIO_ReadPin(IN1_GPIO_Port, IN1_Pin) == GPIO_PIN_RESET) ? (1 << 0) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN2_GPIO_Port, IN2_Pin) == GPIO_PIN_RESET) ? (1 << 1) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN3_GPIO_Port, IN3_Pin) == GPIO_PIN_RESET) ? (1 << 2) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN4_GPIO_Port, IN4_Pin) == GPIO_PIN_RESET) ? (1 << 3) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN5_GPIO_Port, IN5_Pin) == GPIO_PIN_RESET) ? (1 << 4) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN6_GPIO_Port, IN6_Pin) == GPIO_PIN_RESET) ? (1 << 5) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN7_GPIO_Port, IN7_Pin) == GPIO_PIN_RESET) ? (1 << 6) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN8_GPIO_Port, IN8_Pin) == GPIO_PIN_RESET) ? (1 << 7) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN9_GPIO_Port, IN9_Pin) == GPIO_PIN_RESET) ? (1 << 8) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN10_GPIO_Port, IN10_Pin) == GPIO_PIN_RESET) ? (1 << 9) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN11_GPIO_Port, IN11_Pin) == GPIO_PIN_RESET) ? (1 << 10) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN12_GPIO_Port, IN12_Pin) == GPIO_PIN_RESET) ? (1 << 11) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN13_GPIO_Port, IN13_Pin) == GPIO_PIN_RESET) ? (1 << 12) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN14_GPIO_Port, IN14_Pin) == GPIO_PIN_RESET) ? (1 << 13) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN15_GPIO_Port, IN15_Pin) == GPIO_PIN_RESET) ? (1 << 14) : 0;
-   input_state |= (HAL_GPIO_ReadPin(IN16_GPIO_Port, IN16_Pin) == GPIO_PIN_RESET) ? (1 << 15) : 0;
-   push_input(input_state);
-   count++;
-   if(count >= 25){
-     count = 0;
-     monitor_set_state_event();
-     HAL_GPIO_TogglePin(LED_STT_GPIO_Port, LED_STT_Pin);
-   }
-	  press_button(&hi2c3, button1);
-   osDelay(300);
-   release_button(&hi2c3, button1);
-   osDelay(300);
+//    uint16_t input_state = 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN1_GPIO_Port, IN1_Pin) == GPIO_PIN_RESET) ? (1 << 0) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN2_GPIO_Port, IN2_Pin) == GPIO_PIN_RESET) ? (1 << 1) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN3_GPIO_Port, IN3_Pin) == GPIO_PIN_RESET) ? (1 << 2) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN4_GPIO_Port, IN4_Pin) == GPIO_PIN_RESET) ? (1 << 3) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN5_GPIO_Port, IN5_Pin) == GPIO_PIN_RESET) ? (1 << 4) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN6_GPIO_Port, IN6_Pin) == GPIO_PIN_RESET) ? (1 << 5) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN7_GPIO_Port, IN7_Pin) == GPIO_PIN_RESET) ? (1 << 6) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN8_GPIO_Port, IN8_Pin) == GPIO_PIN_RESET) ? (1 << 7) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN9_GPIO_Port, IN9_Pin) == GPIO_PIN_RESET) ? (1 << 8) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN10_GPIO_Port, IN10_Pin) == GPIO_PIN_RESET) ? (1 << 9) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN11_GPIO_Port, IN11_Pin) == GPIO_PIN_RESET) ? (1 << 10) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN12_GPIO_Port, IN12_Pin) == GPIO_PIN_RESET) ? (1 << 11) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN13_GPIO_Port, IN13_Pin) == GPIO_PIN_RESET) ? (1 << 12) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN14_GPIO_Port, IN14_Pin) == GPIO_PIN_RESET) ? (1 << 13) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN15_GPIO_Port, IN15_Pin) == GPIO_PIN_RESET) ? (1 << 14) : 0;
+//    input_state |= (HAL_GPIO_ReadPin(IN16_GPIO_Port, IN16_Pin) == GPIO_PIN_RESET) ? (1 << 15) : 0;
+//    push_input(input_state);
+//    count++;
+//    if(count >= 25){
+//      count = 0;
+//      monitor_set_state_event();
+//      HAL_GPIO_TogglePin(LED_STT_GPIO_Port, LED_STT_Pin);
+//    }
+//	  press_button(&hi2c3, button1);
+//    osDelay(300);
+//    release_button(&hi2c3, button1);
+//    osDelay(300);
   }
   /* USER CODE END StartUpdate_input */
 }
