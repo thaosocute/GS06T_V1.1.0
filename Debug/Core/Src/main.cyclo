@@ -9,6 +9,6 @@
 ../Core/Src/main.c:604:6:HAL_TIM_PeriodElapsedCallback	10
 ../Core/Src/main.c:651:6:HAL_UARTEx_RxEventCallback	2
 ../Core/Src/main.c:660:6:json_err_handle	2
-../Core/Src/main.c:683:6:StartRS485CmdTask	23
-../Core/Src/main.c:810:6:StartUpdate_input	1
-../Core/Src/main.c:867:6:Error_Handler	1
+../Core/Src/main.c:683:6:StartRS485CmdTask	25
+../Core/Src/main.c:816:6:StartUpdate_input	1
+../Core/Src/main.c:872:6:Error_Handler	1

@@ -86,6 +86,42 @@ static uint8_t relay_name_to_button(const char *relay_id, Button_TypeDef *button
     return 0;
 }
 
+static Monitor* find_relay_monitor_by_id(const char *relay_id) {
+    if (!relay_id) return NULL;
+
+    for (int i = 0; i < MONITORS_NUM_MAX; i++) {
+        if (monitors_arr[i].id[0] != '\0' &&
+            monitors_arr[i].type == MON_RELAY &&
+            strcmp(monitors_arr[i].id, relay_id) == 0) {
+            return &monitors_arr[i];
+        }
+    }
+
+    return NULL;
+}
+
+static json_err_t resolve_relay_button(const char *relay_id, Button_TypeDef *button) {
+    if (!relay_id || !button) {
+        return ERR_INVALID_DATA;
+    }
+
+    if (relay_name_to_button(relay_id, button)) {
+        return ERR_NONE;
+    }
+
+    Monitor *target = find_relay_monitor_by_id(relay_id);
+    if (!target) {
+        return ERR_INVALID_ID;
+    }
+
+    if (target->cfg.relay.pin < RL1 || target->cfg.relay.pin > BR6) {
+        return ERR_INVALID_DATA;
+    }
+
+    *button = (Button_TypeDef)target->cfg.relay.pin;
+    return ERR_NONE;
+}
+
 static int get_latest_event(monitor_event_t *events_arr, char *buf, size_t buf_size) {
     // Get latest event
     if (events_count > 0) {
@@ -479,7 +515,7 @@ json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *respons
     if (get_latest_event(monitors_event, events_buf, events_buf_size) != 0) {
         strcpy(events_buf, "[]");
     }
-    uint8_t pending_events = events_count - 1;
+    int pending_events = events_count;
 
     // Build response
     snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"results\":%s},\"events\":%s,\"pending\":%d}",
@@ -621,36 +657,15 @@ json_err_t handle_relay_set(jsmntok_t *tokens, int token_count, char *response, 
     }
 
     Button_TypeDef button;
-    if (relay_name_to_button(relay_id, &button)) {
-        if (relay_on) {
-            press_button(&hi2c3, button);
-        } else {
-            release_button(&hi2c3, button);
-        }
+    json_err_t resolve_err = resolve_relay_button(relay_id, &button);
+    if (resolve_err != ERR_NONE) {
+        return resolve_err;
+    }
+
+    if (relay_on) {
+        press_button(&hi2c3, button);
     } else {
-        Monitor *target = NULL;
-        for (int i = 0; i < MONITORS_NUM_MAX; i++) {
-            if (monitors_arr[i].id[0] != '\0' &&
-                monitors_arr[i].type == MON_RELAY &&
-                strcmp(monitors_arr[i].id, relay_id) == 0) {
-                target = &monitors_arr[i];
-                break;
-            }
-        }
-
-        if (!target) {
-            return ERR_INVALID_ID;
-        }
-
-        if (target->cfg.relay.pin < RL1 || target->cfg.relay.pin > BR6) {
-            return ERR_INVALID_DATA;
-        }
-
-        if (relay_on) {
-            press_button(&hi2c3, (Button_TypeDef)target->cfg.relay.pin);
-        } else {
-            release_button(&hi2c3, (Button_TypeDef)target->cfg.relay.pin);
-        }
+        release_button(&hi2c3, button);
     }
 
     snprintf(response, response_size,
@@ -711,25 +726,9 @@ json_err_t handle_relay_pulse(jsmntok_t *tokens, int token_count, char *response
     uint32_t pulse_ms = (uint32_t)pulse_ms_u64;
 
     Button_TypeDef button;
-    if (!relay_name_to_button(relay_id, &button)) {
-        Monitor *target = NULL;
-        for (int i = 0; i < MONITORS_NUM_MAX; i++) {
-            if (monitors_arr[i].id[0] != '\0' &&
-                monitors_arr[i].type == MON_RELAY &&
-                strcmp(monitors_arr[i].id, relay_id) == 0) {
-                target = &monitors_arr[i];
-                break;
-            }
-        }
-
-        if (!target) {
-            return ERR_INVALID_ID;
-        }
-        if (target->cfg.relay.pin < RL1 || target->cfg.relay.pin > BR6) {
-            return ERR_INVALID_DATA;
-        }
-
-        button = (Button_TypeDef)target->cfg.relay.pin;
+    json_err_t resolve_err = resolve_relay_button(relay_id, &button);
+    if (resolve_err != ERR_NONE) {
+        return resolve_err;
     }
 
     __disable_irq();
@@ -793,24 +792,9 @@ json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *resp
     json_parse_string(g_json_str, &tokens[relay_id_idx], relay_id);
 
     Button_TypeDef button;
-    if (!relay_name_to_button(relay_id, &button)) {
-        Monitor *target = NULL;
-        for (int i = 0; i < MONITORS_NUM_MAX; i++) {
-            if (monitors_arr[i].id[0] != '\0' &&
-                monitors_arr[i].type == MON_RELAY &&
-                strcmp(monitors_arr[i].id, relay_id) == 0) {
-                target = &monitors_arr[i];
-                break;
-            }
-        }
-
-        if (!target) {
-            return ERR_INVALID_ID;
-        }
-        if (target->cfg.relay.pin < RL1 || target->cfg.relay.pin > BR6) {
-            return ERR_INVALID_DATA;
-        }
-        button = (Button_TypeDef)target->cfg.relay.pin;
+    json_err_t resolve_err = resolve_relay_button(relay_id, &button);
+    if (resolve_err != ERR_NONE) {
+        return resolve_err;
     }
 
     int seq_count = tokens[sequence_idx].size;
@@ -887,6 +871,53 @@ json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *resp
     snprintf(response, response_size,
              "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":null,\"events\":[],\"pending\":0}",
              (unsigned long)seq);
+
+    return ERR_NONE;
+}
+json_err_t handle_reset(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
+    if (!g_json_str || !tokens || token_count <= 0) {
+        return ERR_INVALID_CMD;
+    }
+
+    uint32_t seq = find_seq_number(tokens, token_count);
+
+    // Tìm "data"
+    int data_idx = -1;
+    for (int i = 1; i < token_count; i++) {
+        if (jsoneq(g_json_str, &tokens[i], "data") == 0 && (i + 1) < token_count) {
+            data_idx = i + 1;
+            break;
+        }
+    }
+    if (data_idx == -1) {
+        return ERR_INVALID_CMD;
+    }
+
+    // reset command yêu cầu data:null
+    int data_len = tokens[data_idx].end - tokens[data_idx].start;
+    if (tokens[data_idx].type != JSMN_PRIMITIVE ||
+        data_len != 4 ||
+        strncmp(g_json_str + tokens[data_idx].start, "null", 4) != 0) {
+        return ERR_INVALID_DATA;
+    }
+
+    uint32_t relays_cleared = 0;
+    for (int button = (int)RL1; button <= (int)RL14; button++) {
+        release_button(&hi2c3, (Button_TypeDef)button);
+        relays_cleared++;
+    }
+    for (int button = (int)BR1; button <= (int)BR6; button++) {
+        release_button(&hi2c3, (Button_TypeDef)button);
+        relays_cleared++;
+    }
+
+    int queue_cleared = events_count;
+    events_count = 0;
+    events_index = 0;
+
+    snprintf(response, response_size,
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"relays_cleared\":%lu,\"queue_cleared\":%d},\"events\":[],\"pending\":0}",
+             (unsigned long)seq, (unsigned long)relays_cleared, queue_cleared);
 
     return ERR_NONE;
 }
