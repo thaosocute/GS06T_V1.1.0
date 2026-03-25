@@ -4,14 +4,8 @@
 #include <stdlib.h>  // for strtol
 #include <stdio.h>   // for snprintf
 
-static inline Input_TypeDef sanitize_input_pin(uint64_t val) {
-    if (val >= 1 && val <= 16) {
-        return (Input_TypeDef)val;
-    }
-    return 0;  // 0 nghĩa chưa gán/unassigned
-}
-
 Monitor monitors_arr[MONITORS_NUM_MAX];
+Relay_output_TypeDef relay_output_arr[RELAY_OUTPUT_NUM_MAX];
 
 static const char *g_json_str = NULL;
 
@@ -23,17 +17,13 @@ extern int events_count;
 
 extern I2C_HandleTypeDef hi2c3;
 extern volatile uint32_t tim6_tick_ms;
-extern volatile uint8_t tim6_pulse_active;
-extern volatile uint8_t tim6_pulse_button;
-extern volatile uint32_t tim6_pulse_end_tick;
-extern volatile uint8_t tim6_pulse_seq_active;
-extern volatile uint8_t tim6_pulse_seq_button;
-extern volatile uint8_t tim6_pulse_seq_phase;
-extern volatile uint8_t tim6_pulse_seq_index;
-extern volatile uint8_t tim6_pulse_seq_count;
-extern volatile uint32_t tim6_pulse_seq_deadline;
-extern volatile uint32_t tim6_pulse_seq_pulse_ms[RELAY_PULSE_SEQ_MAX_STEPS];
-extern volatile uint32_t tim6_pulse_seq_gap_ms[RELAY_PULSE_SEQ_MAX_STEPS];
+
+static inline Input_TypeDef sanitize_input_pin(uint64_t val) {
+    if (val >= 1 && val <= 16) {
+        return (Input_TypeDef)val;
+    }
+    return 0;  // 0 nghĩa chưa gán/unassigned
+}
 
 void monitors_set_json(const char *json_str) {
     g_json_str = json_str;
@@ -94,31 +84,31 @@ static uint8_t relay_name_to_button(const char *relay_id, Button_TypeDef *button
     return 0;
 }
 
-static int get_latest_event(monitor_event_t *events_arr, char *buf, size_t buf_size) {
-    // Get latest event
-    if (events_count > 0) {
-        int latest_idx = (events_index - 1 + EVENTS_HISTORY_MAX) % EVENTS_HISTORY_MAX;
-        monitor_event_t *event = &monitors_event[latest_idx];
-        if(event->monitor_id[0] != '\0') {
-            events_index--;
-            events_count--;
-        }
-        // Find monitor type
-        char *type_str = "unknown";
-        for (int i = 0; i < 16; i++) {
-            if (strcmp(monitors_arr[i].id, event->monitor_id) == 0) {
-                type_str = monitor_type_to_str(monitors_arr[i].type);
-                break;
-            }
-        }
-        snprintf(buf, buf_size, "[{\"id\":\"%s\",\"type\":\"%s\",\"state\":\"%s\",\"prev\":\"%s\",\"ts_ms\":%lu}]",
-                 event->monitor_id, type_str, state_to_str(event->current_state), state_to_str(event->prev_state), event->event_time);
+// static int get_latest_event(monitor_event_t *events_arr, char *buf, size_t buf_size) {
+//     // Get latest event
+//     if (events_count > 0) {
+//         int latest_idx = (events_index - 1 + EVENTS_HISTORY_MAX) % EVENTS_HISTORY_MAX;
+//         monitor_event_t *event = &monitors_event[latest_idx];
+//         if(event->monitor_id[0] != '\0') {
+//             events_index--;
+//             events_count--;
+//         }
+//         // Find monitor type
+//         char *type_str = "unknown";
+//         for (int i = 0; i < 16; i++) {
+//             if (strcmp(monitors_arr[i].id, event->monitor_id) == 0) {
+//                 type_str = monitor_type_to_str(monitors_arr[i].type);
+//                 break;
+//             }
+//         }
+//         snprintf(buf, buf_size, "[{\"id\":\"%s\",\"type\":\"%s\",\"state\":\"%s\",\"prev\":\"%s\",\"ts_ms\":%lu}]",
+//                  event->monitor_id, type_str, state_to_str(event->current_state), state_to_str(event->prev_state), event->event_time);
     
-        return 0; 
-    } else {
-        return -1;
-    }
-}
+//         return 0; 
+//     } else {
+//         return -1;
+//     }
+// }
 
 static void build_events_json(char *out_buf, size_t out_buf_size, int events_to_take) {
     if (!out_buf || out_buf_size == 0) return;
@@ -190,6 +180,83 @@ close:
 
 fail:
     snprintf(out_buf, out_buf_size, "[]");
+}
+
+static Relay_output_TypeDef *relay_output_get(Button_TypeDef button) {
+    if (button == 0) return NULL;
+    uint8_t idx = (uint8_t)button - 1;
+    if (idx >= RELAY_OUTPUT_NUM_MAX) return NULL;
+    return &relay_output_arr[idx];
+}
+
+static void relay_output_step(Relay_output_TypeDef *ro, uint32_t now_ms) {
+    if (!ro) return;
+    if (ro->state == RELAY_IDLE || ro->state == RELAY_ON) return;
+    if (ro->deadline_ms == 0 || (int32_t)(now_ms - ro->deadline_ms) < 0) return;
+
+    /* Phase 1 of pulse: release button */
+    if (ro->state == RELAY_PULSE) {
+        release_button(&hi2c3, ro->button);
+
+        /* Simple pulse (not part of sequence) */
+        if (!ro->in_seq) {
+            ro->state = RELAY_IDLE;
+            ro->deadline_ms = 0;
+            return;
+        }
+
+        /* Sequence pulse: check if more gaps left */
+        if (ro->seq_pos >= ro->seq_count - 1) {
+            ro->state = RELAY_IDLE;
+            ro->in_seq = 0;
+            ro->deadline_ms = 0;
+            return;
+        }
+
+        /* Transition to gap phase */
+        uint32_t gap = ro->gap_ms[ro->seq_pos];
+        ro->state = RELAY_GAP;
+        ro->deadline_ms = now_ms + gap;
+        return;
+    }
+
+    /* Phase 2 of sequence: gap done, press button again */
+    if (ro->state == RELAY_GAP) {
+        ro->seq_pos++;
+        if (ro->seq_pos >= ro->seq_count) {
+            ro->state = RELAY_IDLE;
+            ro->in_seq = 0;
+            ro->deadline_ms = 0;
+            return;
+        }
+
+        press_button(&hi2c3, ro->button);
+        ro->state = RELAY_PULSE;
+        ro->deadline_ms = now_ms + ro->pulse_ms[ro->seq_pos];
+        return;
+    }
+}
+
+void relay_output_timer_tick(void) {
+    uint32_t now_ms = tim6_tick_ms;
+    for (uint8_t i = 0; i < RELAY_OUTPUT_NUM_MAX; i++) {
+        relay_output_step(&relay_output_arr[i], now_ms);
+    }
+}
+
+void set_relay_output_button(){
+    for(uint8_t i = 0; i < RELAY_OUTPUT_NUM_MAX; i++){
+        relay_output_arr[i].button = (Button_TypeDef)(i+1);
+        relay_output_arr[i].state = RELAY_IDLE;
+        relay_output_arr[i].deadline_ms = 0;
+        relay_output_arr[i].in_seq = 0;
+        relay_output_arr[i].seq_pos = 0;
+        relay_output_arr[i].seq_count = 0;
+        for (uint8_t j = 0; j < RELAY_PULSE_SEQ_MAX_STEPS; j++) {
+            relay_output_arr[i].pulse_ms[j] = 0;
+            relay_output_arr[i].gap_ms[j] = 0;
+        }
+    }
 }
 
 void handle_error(json_err_t error, uint32_t seq, char *response, size_t response_size) {
@@ -540,16 +607,29 @@ json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *respons
         snprintf(results_buf, results_buf_size, "[]");
     }
 
-    size_t events_buf_size = 192;
-    char *events_buf = malloc(events_buf_size);
+    // size_t events_buf_size = 192;
+    // char *events_buf = malloc(events_buf_size);
+    // if (!events_buf) {
+    //     free(results_buf);
+    //     return ERR_INVALID_DATA;
+    // }
+    // if (get_latest_event(monitors_event, events_buf, events_buf_size) != 0) {
+    //     strcpy(events_buf, "[]");
+    // }
+    // uint8_t pending_events = events_count - 1;
+    // lấy các sự kiện (events)
+    int events_to_take = events_count;
+    if (events_to_take > 5) events_to_take = 5;
+
+    size_t events_buf_size = 32 + (size_t)events_to_take * 140;
+    if (events_buf_size < 128) events_buf_size = 128;
+    char *events_buf = (char *)malloc(events_buf_size);
     if (!events_buf) {
-        free(results_buf);
-        return ERR_INVALID_DATA;
+        return ERR_INVALID_CMD;
     }
-    if (get_latest_event(monitors_event, events_buf, events_buf_size) != 0) {
-        strcpy(events_buf, "[]");
-    }
-    uint8_t pending_events = events_count - 1;
+    build_events_json(events_buf, events_buf_size, events_to_take);
+
+    int pending_events = events_count;
 
     // Build response
     snprintf(response, response_size, "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"results\":%s},\"events\":%s,\"pending\":%d}\r\n",
@@ -750,15 +830,35 @@ json_err_t handle_relay_set(jsmntok_t *tokens, int token_count, char *response, 
     }
 
     Button_TypeDef button;
-    if (relay_name_to_button(relay_id, &button)) {
-        if (relay_on) {
-            press_button(&hi2c3, button);
-        } else {
-            release_button(&hi2c3, button);
-        }
-    } else {
+    if (!relay_name_to_button(relay_id, &button)) {
         return ERR_INVALID_DATA;
     }
+
+    Relay_output_TypeDef *ro = relay_output_get(button);
+    if (!ro) {
+        return ERR_INVALID_DATA;
+    }
+
+    __disable_irq();
+    int busy = (ro->state == RELAY_PULSE || ro->state == RELAY_GAP || ro->in_seq);
+    __enable_irq();
+    if (busy) {
+        return ERR_BUSY;
+    }
+
+    if (relay_on) {
+        press_button(&hi2c3, button);
+    } else {
+        release_button(&hi2c3, button);
+    }
+
+    __disable_irq();
+    ro->state = relay_on ? RELAY_ON : RELAY_IDLE;
+    ro->deadline_ms = 0;
+    ro->in_seq = 0;
+    ro->seq_pos = 0;
+    ro->seq_count = 0;
+    __enable_irq();
 
     // lấy các sự kiện (events)
     int events_to_take = events_count;
@@ -834,18 +934,30 @@ json_err_t handle_relay_pulse(jsmntok_t *tokens, int token_count, char *response
     uint32_t pulse_ms = (uint32_t)pulse_ms_u64;
 
     Button_TypeDef button;
-    relay_name_to_button(relay_id, &button);
+    if (!relay_name_to_button(relay_id, &button)) {
+        return ERR_INVALID_DATA;
+    }
+
+    Relay_output_TypeDef *ro = relay_output_get(button);
+    if (!ro) {
+        return ERR_INVALID_DATA;
+    }
 
     __disable_irq();
-    if (tim6_pulse_active) {
-        __enable_irq();
+    int busy = (ro->state != RELAY_IDLE);
+    __enable_irq();
+    if (busy) {
         return ERR_BUSY;
     }
 
     press_button(&hi2c3, button);
-    tim6_pulse_button = (uint8_t)button;
-    tim6_pulse_end_tick = tim6_tick_ms + pulse_ms;
-    tim6_pulse_active = 1;
+
+    __disable_irq();
+    ro->state = RELAY_PULSE;
+    ro->deadline_ms = tim6_tick_ms + pulse_ms;
+    ro->in_seq = 0;
+    ro->seq_pos = 0;
+    ro->seq_count = 0;
     __enable_irq();
 
     // lấy các sự kiện (events)
@@ -913,7 +1025,9 @@ json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *resp
     json_parse_string(g_json_str, &tokens[relay_id_idx], relay_id);
 
     Button_TypeDef button;
-    relay_name_to_button(relay_id, &button);
+    if (!relay_name_to_button(relay_id, &button)) {
+        return ERR_INVALID_DATA;
+    }
 
     int seq_count = tokens[sequence_idx].size;
     if (seq_count <= 0) {
@@ -966,24 +1080,34 @@ json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *resp
         current += 1 + obj_size * 2;
     }
 
+    Relay_output_TypeDef *ro = relay_output_get(button);
+    if (!ro) {
+        return ERR_INVALID_DATA;
+    }
+
     __disable_irq();
-    if (tim6_pulse_active || tim6_pulse_seq_active) {
-        __enable_irq();
+    int busy = (ro->state != RELAY_IDLE);
+    __enable_irq();
+    if (busy) {
         return ERR_BUSY;
     }
 
+    /* Setup sequence parameters within critical section */
+    __disable_irq();
+    ro->in_seq = 1;
+    ro->seq_pos = 0;
+    ro->seq_count = (uint8_t)seq_count;
     for (int i = 0; i < seq_count; i++) {
-        tim6_pulse_seq_pulse_ms[i] = pulse_list[i];
-        tim6_pulse_seq_gap_ms[i] = gap_list[i];
+        ro->pulse_ms[i] = pulse_list[i];
+        ro->gap_ms[i] = gap_list[i];
     }
+    __enable_irq();
 
-    tim6_pulse_seq_button = (uint8_t)button;
-    tim6_pulse_seq_index = 0;
-    tim6_pulse_seq_count = (uint8_t)seq_count;
-    tim6_pulse_seq_phase = 1;
-    tim6_pulse_seq_deadline = tim6_tick_ms + tim6_pulse_seq_pulse_ms[0];
-    tim6_pulse_seq_active = 1;
     press_button(&hi2c3, button);
+
+    __disable_irq();
+    ro->state = RELAY_PULSE;
+    ro->deadline_ms = tim6_tick_ms + ro->pulse_ms[0];
     __enable_irq();
 
     // lấy các sự kiện (events)
@@ -1006,4 +1130,62 @@ json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *resp
 
     free(events_buf);
     return ERR_NONE;
+}
+
+json_err_t handle_reset(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
+    if (!g_json_str || !tokens || token_count <= 0) {
+        return ERR_INVALID_CMD;
+    }
+
+    uint32_t seq = find_seq_number(tokens, token_count);
+
+    // Tìm "data"
+    int data_idx = -1;
+    for (int i = 1; i < token_count; i++) {
+        if (jsoneq(g_json_str, &tokens[i], "data") == 0 && (i + 1) < token_count) {
+            data_idx = i + 1;
+            break;
+        }
+    }
+    if (data_idx == -1) {
+        return ERR_INVALID_CMD;
+    }
+
+    // reset command yêu cầu data:null
+    int data_len = tokens[data_idx].end - tokens[data_idx].start;
+    if (tokens[data_idx].type != JSMN_PRIMITIVE ||
+        data_len != 4 ||
+        strncmp(g_json_str + tokens[data_idx].start, "null", 4) != 0) {
+        return ERR_INVALID_DATA;
+    }
+
+    uint32_t relays_cleared = 0;
+    for (int i = 0; i < RELAY_OUTPUT_NUM_MAX; i++) {
+        Relay_output_TypeDef *ro = &relay_output_arr[i];
+        uint8_t was_active = (ro->state == RELAY_PULSE || ro->state == RELAY_GAP || ro->in_seq);
+
+        ro->state = RELAY_IDLE;
+        ro->in_seq = 0;
+        ro->seq_pos = 0;
+        ro->seq_count = 0;
+        ro->deadline_ms = 0;
+
+        /* Always release output to ensure relay tắt */
+        release_button(&hi2c3, ro->button);
+
+        if (was_active) {
+            relays_cleared++;
+        }
+    }
+
+    int queue_cleared = events_count;
+    events_count = 0;
+    events_index = 0;
+
+    snprintf(response, response_size,
+             "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"relays_cleared\":%lu,\"queue_cleared\":%u},\"events\":[],\"pending\":0}",
+             (unsigned long)seq, relays_cleared, queue_cleared);
+
+    return ERR_NONE;
+
 }

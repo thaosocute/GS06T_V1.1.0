@@ -82,7 +82,7 @@ static PinAnalysis analyze_pin(uint8_t n_samples, uint8_t pin) {
 static json_monitor_state_t infer_from_analysis(MonitorType type, PinAnalysis *a) {
     /* tín hiệu tĩnh */
     if (a->transitions == 0) {
-        return (a->duty_cycle >= 0.99f) ? ON : OFF;
+        return (a->duty_cycle >= 0.85f) ? ON : OFF;
     }
 
     /* so khớp a->freq_hz với các mức BLINK_* */
@@ -215,12 +215,12 @@ void update_monitor_state(Monitor *monitor) {
                     uint8_t has_blink = (a_r.transitions > 0) || (a_g.transitions > 0) || (a_b.transitions > 0) || (a_o.transitions > 0);
                     if (!has_blink) {
                         // tĩnh, chỉ 1 led tại 1 thời điểm
-                        uint8_t r = a_r.duty_cycle >= 0.99f;
-                        uint8_t g = a_g.duty_cycle >= 0.99f;
-                        uint8_t b = a_b.duty_cycle >= 0.99f;
-                        uint8_t o = a_o.duty_cycle >= 0.99f;
+                        uint8_t r = a_r.duty_cycle >= 0.85f;
+                        uint8_t g = a_g.duty_cycle >= 0.85f;
+                        uint8_t b = a_b.duty_cycle >= 0.85f;
+                        uint8_t o = a_o.duty_cycle >= 0.85f;
                         uint8_t active = r + g + b + o;
-                        if (active != 1) {
+                        if (active > 1) {
                             monitor->state = UNKNOWN;
                         } else if (r) {
                             monitor->state = ON;
@@ -240,7 +240,7 @@ void update_monitor_state(Monitor *monitor) {
                         if (a_g.transitions > 0) blinking_pins++;
                         if (a_b.transitions > 0) blinking_pins++;
                         if (a_o.transitions > 0) blinking_pins++;
-                        if (blinking_pins != 1) {
+                        if (blinking_pins > 1) {
                             monitor->state = UNKNOWN;
                         } else {
                             PinAnalysis *active_a = NULL;
@@ -254,7 +254,7 @@ void update_monitor_state(Monitor *monitor) {
                                     if (blink == BLINK_1HZ) monitor->state = BLINK_RED_1HZ;
                                     else if (blink == BLINK_5HZ) monitor->state = BLINK_RED_5HZ;
                                     else monitor->state = UNKNOWN;
-                                } else if (active_a == &a_b) {
+                                } else if (active_a == &a_b || active_a == &a_g) {
                                     if (blink == BLINK_1HZ) monitor->state = BLINK_BLUE_1HZ;
                                     else if (blink == BLINK_5HZ) monitor->state = BLINK_BLUE_5HZ;
                                     else if (blink == BLINK_0_25HZ) monitor->state = BLINK_BLUE_0_25HZ;
@@ -285,7 +285,7 @@ void update_monitor_state(Monitor *monitor) {
                         uint8_t b = get_pin(0, monitor->cfg.led_mc.pin_b);
                         uint8_t o = get_pin(0, monitor->cfg.led_mc.pin_orange);
                         uint8_t active = r + g + b + o;
-                        if (active != 1) {
+                        if (active > 1) {
                             monitor->state = UNKNOWN;
                         } else if (r) {
                             monitor->state = ON;

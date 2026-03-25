@@ -129,6 +129,8 @@ volatile uint32_t tim6_pulse_seq_gap_ms[RELAY_PULSE_SEQ_MAX_STEPS] = {0};
 volatile uint8_t tim6_press_req = 0;
 volatile uint8_t tim6_release_req = 0;
 
+extern Relay_output_TypeDef relay_output_arr[RELAY_OUTPUT_NUM_MAX];
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -209,6 +211,7 @@ int main(void)
   HAL_GPIO_WritePin(EN1_GPIO_Port, EN1_Pin, GPIO_PIN_SET); 
   HAL_GPIO_WritePin(EN2_GPIO_Port, EN2_Pin, GPIO_PIN_SET);
 
+  set_relay_output_button();
   HAL_TIM_Base_Start_IT(&htim6);
   
   /* USER CODE END 2 */
@@ -617,55 +620,11 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-  if (htim->Instance != TIM6) return;
-
-  tim6_tick_ms++;
-
-  if (tim6_pulse_active && (int32_t)(tim6_tick_ms - tim6_pulse_end_tick) >= 0) {
-    release_button(&hi2c3, (Button_TypeDef)tim6_pulse_button);
-    tim6_pulse_active = 0;
-  }
-
-  if (tim6_pulse_seq_active && (int32_t)(tim6_tick_ms - tim6_pulse_seq_deadline) >= 0) {
-    if (tim6_pulse_seq_phase == 1) {
-      release_button(&hi2c3, (Button_TypeDef)tim6_pulse_seq_button);
-
-      if (tim6_pulse_seq_index >= tim6_pulse_seq_count - 1) {
-        tim6_pulse_seq_active = 0;
-        tim6_pulse_seq_phase = 0;
-      } else {
-        uint32_t gap_ms = tim6_pulse_seq_gap_ms[tim6_pulse_seq_index];
-        tim6_pulse_seq_phase = 2;
-        tim6_pulse_seq_deadline = tim6_tick_ms + gap_ms;
-      }
-    } else if (tim6_pulse_seq_phase == 2) {
-      tim6_pulse_seq_index++;
-      if (tim6_pulse_seq_index >= tim6_pulse_seq_count) {
-        tim6_pulse_seq_active = 0;
-        tim6_pulse_seq_phase = 0;
-      } else {
-        press_button(&hi2c3, (Button_TypeDef)tim6_pulse_seq_button);
-        tim6_pulse_seq_phase = 1;
-        tim6_pulse_seq_deadline = tim6_tick_ms + tim6_pulse_seq_pulse_ms[tim6_pulse_seq_index];
-      }
-    }
+  if (htim->Instance == TIM6) {
+    tim6_tick_ms++;
+    relay_output_timer_tick();
   }
 }
-
-//functions
-// void json_err_handle(json_err_t* err){
-//   if(*err == ERR_NONE){
-//     return;
-//   }
-//   char err_code[20];
-//   strcpy(err_code, json_err_to_code(*err));
-//   max3485_transmit(&hmax3485_2, (uint8_t*)err_code, strlen(err_code), HAL_MAX_DELAY);
-// }
-
-//void handle_monitors_config();
-//void handle_relay_set();
-//void handle_relay_pulse();
-//void handle_relay_pulse_seq();
 
 /* USER CODE END 4 */
 
@@ -788,6 +747,12 @@ void StartRS485CmdTask(void *argument)
             }
             break;
           case CMD_RESET:
+            monitors_set_json((const char*)rx_buffer);  
+            error = handle_reset(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
+              memset(response, 0, sizeof(response));
+            }
             break;
         }
       }
@@ -844,7 +809,7 @@ void StartUpdate_input(void *argument)
       monitor_set_state_event();
       HAL_GPIO_TogglePin(LED_STT_GPIO_Port, LED_STT_Pin);
     } 
-    osDelay(50);  // �?�?c mỗi 100ms, có thể đi�?u chỉnh
+    osDelay(SAMPLE_RATE_MS);  // �?�?c mỗi 100ms, có thể đi�?u chỉnh
   }
   /* USER CODE END StartUpdate_input */
 }

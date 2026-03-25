@@ -9,7 +9,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define MONITORS_NUM_MAX 16
+#define MONITORS_NUM_MAX 20
+#define RELAY_OUTPUT_NUM_MAX 20
 #define RELAY_PULSE_SEQ_MAX_STEPS 10
 
 /* ── Enums ─────────────────────────────────────────────── */
@@ -30,6 +31,13 @@ typedef enum {
     ACTIVE_CLOSED,
     ACTIVE_OPEN
 } ActiveState;
+
+typedef enum {
+    RELAY_IDLE,
+    RELAY_PULSE,
+    RELAY_GAP,
+    RELAY_ON
+} relay_output_state_t;
 
 /* ── Config theo từng loại ─────────────────────────────── */
 
@@ -87,10 +95,25 @@ typedef struct {
     json_monitor_state_t state;
 } Monitor;
 
+typedef struct {
+    Button_TypeDef button;
+    uint32_t deadline_ms;
+    relay_output_state_t state;
+    uint8_t in_seq;
+    uint8_t seq_pos;
+    uint8_t seq_count;
+    uint32_t pulse_ms[RELAY_PULSE_SEQ_MAX_STEPS];
+    uint32_t gap_ms[RELAY_PULSE_SEQ_MAX_STEPS];
+} Relay_output_TypeDef;
+
+void relay_output_timer_tick(void);
+
 /// Set the current JSON buffer for handlers.
 /// The token array passed to handlers must refer to this buffer.
 void monitors_set_json(const char *json_str);
 void monitor_set_state_event();
+void set_relay_output_button();
+
 uint32_t find_seq_number(jsmntok_t *tokens, int token_count);
 
 void handle_error(json_err_t error, uint32_t seq, char *response, size_t response_size);
@@ -104,5 +127,6 @@ json_err_t handle_flush_events(jsmntok_t *tokens, int token_count, char *respons
 json_err_t handle_relay_set(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 json_err_t handle_relay_pulse(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
+json_err_t handle_reset(jsmntok_t *tokens, int token_count, char *response, size_t response_size);
 
 #endif //MONITOR_CONFIG_H

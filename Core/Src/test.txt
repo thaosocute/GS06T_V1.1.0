@@ -1,1 +1,2 @@
-{"cmd":"monitor_config","seq":1,"data":{"monitors":[{"id":"O1_net_led","type":"led_multicolor","pin_b":7,"pin_r":3,"mode":"pattern","observe_ms":5000}]}}
+{"cmd":"monitor_config","seq":1,"data":{"monitors":[{"id":"O1_net_led","type":"led_multicolor","pin_b":3,"pin_r":4,"mode":"pattern","observe_ms":5000},{"id":"O2_power_led","type":"led_multicolor","pin_g":5,"pin_o":6,"mode":"pattern","observe_ms":5000},{"id":"O3_buzzer","type":"buzzer","pin":2,"mode":"event","debounce_ms":50}
+]}}
