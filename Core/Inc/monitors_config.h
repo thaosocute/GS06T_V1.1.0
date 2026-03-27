@@ -93,6 +93,7 @@ typedef struct {
 
     MonitorConfig cfg;
     json_monitor_state_t state;
+    float confident;
 } Monitor;
 
 typedef struct {

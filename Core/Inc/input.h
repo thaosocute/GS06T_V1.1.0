@@ -28,6 +28,7 @@ typedef struct {
 
 void push_input(uint16_t val);
 void update_monitor_state(Monitor *monitor);
+PinAnalysis analyze_pin(uint8_t n_samples, uint8_t pin);
 
 extern monitor_event_t monitors_event[EVENTS_HISTORY_MAX];
 extern int events_index;

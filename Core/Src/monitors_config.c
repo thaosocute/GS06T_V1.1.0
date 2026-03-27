@@ -484,6 +484,7 @@ json_err_t handle_ping(jsmntok_t *tokens, int token_count, char *response, size_
     snprintf(response, response_size,
              "{\"cmd\":\"ok\",\"seq\":%lu,\"data\":{\"uptime_ms\":%lu,\"fw_version\":\"%s\",\"num_monitors\":%d},\"events\":%s,\"pending\":%d}\r\n",
              seq, uptime_ms, FIRMWARE_VERSION, num_monitors, events_buf, pending_events);
+    // snprintf(response, response_size,"{\"cmd\":\"ok\",\"seq\":12345,\"data\":{\"uptime_ms\":67890,\"fw_version\":\"1.0.0\",\"num_monitors\":2},\"events\":%s,\"pending\":0}\r\n", events_buf);
     free(events_buf);
     return ERR_NONE;
 }
@@ -492,10 +493,12 @@ static int state_to_code(json_monitor_state_t state) {
     return (int)state;
 }
 
-static float get_confidence(json_monitor_state_t state) {
-    if (state == DETECTING || state == UNKNOWN) return 0.0f;
-    if (state >= BLINK_1HZ && state <= BLINK_3_PER_MIN) return 0.94f; // blink states
-    return 1.0f;
+static float get_confidence(Monitor *mon) {
+    if(mon->mode == MON_MODE_EVENT) {
+        return 1;
+    } else {
+        return mon->confident;
+    }
 }
 
 json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *response, size_t response_size) {
@@ -587,10 +590,12 @@ json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *respons
                 }
             }
             uint32_t ts_ms = HAL_GetTick();
-            float conf = get_confidence(mon->state);
+            float conf = get_confidence(mon);
+            conf = conf * 100;
+            int confident = (int)conf;
             n = snprintf(results_buf + results_used, results_remain,
-                         "{\"id\":\"%s\",\"state\":\"%s\",\"state_code\":%d,\"confidence\":%.2f,\"ts_ms\":%lu}\r\n",
-                         mon->id, state_to_str(mon->state), state_to_code(mon->state), conf, (unsigned long)ts_ms);
+                         "{\"id\":\"%s\",\"state\":\"%s\",\"state_code\":%d,\"confidence\":%d,\"ts_ms\":%lu}\r\n",
+                         mon->id, state_to_str(mon->state), state_to_code(mon->state), confident, (unsigned long)ts_ms);
             if (n < 0 || (size_t)n >= results_remain) {
                 break;
             }

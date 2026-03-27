@@ -59,6 +59,7 @@ typedef enum {
     BLINK_ORANGE_5HZ,
     BLINK_PURPLE_1HZ,
     BLINK_PURPLE_5HZ,
+    BLINK_GREEN_1HZ,
     // mã buzzer
     BEEP_ONCE = 50,
     BEEP_ONCE_EXIT = 51,
