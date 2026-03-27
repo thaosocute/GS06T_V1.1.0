@@ -49,6 +49,7 @@ typedef StaticSemaphore_t osStaticSemaphoreDef_t;
 #define TOKENS_NUM 192
 #define RX_BUFFER_SIZE_MAX 2048
 #define RESPONSE_SIZE_MAX 2048
+#define ERROR_RESPONSE_SIZE_MAX 128
 
 /* USER CODE END PD */
 
@@ -110,6 +111,7 @@ uint16_t rx_index = 0;
 uint16_t timer = 0;
 
 char response[RESPONSE_SIZE_MAX];
+char err_response[ERROR_RESPONSE_SIZE_MAX];
 
 extern char error_reason[32];
 
@@ -657,6 +659,7 @@ void StartRS485CmdTask(void *argument)
       ret = jsmn_parse(&parser, (const char *)rx_buffer, strlen((const char *)rx_buffer), tokens, TOKENS_NUM);
       if(ret < 0){
         error = ERR_JSON_PARSE;
+        snprintf(error_reason, sizeof(error_reason), "parse");
       } else {
         seq_num = find_seq_number(tokens, ret);
         for(uint8_t i = 1; i < ret; i++) {
@@ -674,6 +677,10 @@ void StartRS485CmdTask(void *argument)
         switch(num) {
           default:
             error = ERR_INVALID_CMD;
+            snprintf(error_reason, sizeof(error_reason), "%s", cmd[0] ? cmd : "unknown");
+            handle_error(error, seq_num, err_response, sizeof(err_response));
+            HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+            HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             break;
           case CMD_MONITOR_CONFIG: {
             monitors_set_json((const char*)rx_buffer);
@@ -683,6 +690,10 @@ void StartRS485CmdTask(void *argument)
               HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
               // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
               // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           }
@@ -694,6 +705,10 @@ void StartRS485CmdTask(void *argument)
               HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
               HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
               // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_READ_SNAPSHOT:
@@ -704,6 +719,10 @@ void StartRS485CmdTask(void *argument)
               HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
               HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
               // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_POLL:
@@ -714,6 +733,10 @@ void StartRS485CmdTask(void *argument)
               HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
               HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
               // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_FLUSH_EVENTS:
@@ -724,6 +747,10 @@ void StartRS485CmdTask(void *argument)
               HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
               HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
               memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_PING:
@@ -739,6 +766,10 @@ void StartRS485CmdTask(void *argument)
               // sprintf(debug_buf, "TX status: %d, gState: %ld, err: %lu\r\n", status, huart3.gState, huart3.ErrorCode);
               // max3485_transmit(&hmax3485_1, (uint8_t*)debug_buf, strlen(debug_buf), HAL_MAX_DELAY);
               // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_RELAY_SET:
@@ -749,6 +780,10 @@ void StartRS485CmdTask(void *argument)
               HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
               HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
               // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_RELAY_PULSE:
@@ -759,6 +794,10 @@ void StartRS485CmdTask(void *argument)
               HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
               HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
               // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_RELAY_PULSE_SEQ:
@@ -769,6 +808,10 @@ void StartRS485CmdTask(void *argument)
               HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
               HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
               // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_RESET:
@@ -779,16 +822,14 @@ void StartRS485CmdTask(void *argument)
               HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
               HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
               // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
         }
       }
-      // json_err_handle(&error);
-      handle_error(error, seq_num, response, strlen(response));
-      if (error != ERR_NONE) {
-        max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
-      }
-      error = ERR_NONE;
       memset(rx_buffer, 0, RX_BUFFER_SIZE_MAX);
       rx_index = 0;
       HAL_UARTEx_ReceiveToIdle_DMA(&huart3, rx_buffer, RX_BUFFER_SIZE_MAX);

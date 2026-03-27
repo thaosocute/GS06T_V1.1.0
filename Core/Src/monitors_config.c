@@ -268,6 +268,10 @@ void handle_error(json_err_t error, uint32_t seq, char *response, size_t respons
 
     // tạo message string
     char *msg_string = (char *)malloc(64);
+    if (error_reason[0] == '\0') {
+        snprintf(error_reason, sizeof(error_reason), "unknown");
+    }
+
     if(error == ERR_INVALID_CMD){ 
         snprintf(msg_string, 64, "command %s invalid", error_reason);
         memset(error_reason, 0, sizeof(error_reason));
@@ -581,28 +585,33 @@ json_err_t handle_read_pattern(jsmntok_t *tokens, int token_count, char *respons
                 break;
             }
         }
-        if (mon) {
-            if (results_count > 0) {
-                if (results_used + 1 < results_buf_size) {
-                    results_buf[results_used++] = ',';
-                    results_buf[results_used] = '\0';
-                    results_remain = results_buf_size - results_used;
-                }
-            }
-            uint32_t ts_ms = HAL_GetTick();
-            float conf = get_confidence(mon);
-            conf = conf * 100;
-            int confident = (int)conf;
-            n = snprintf(results_buf + results_used, results_remain,
-                         "{\"id\":\"%s\",\"state\":\"%s\",\"state_code\":%d,\"confidence\":%d,\"ts_ms\":%lu}\r\n",
-                         mon->id, state_to_str(mon->state), state_to_code(mon->state), confident, (unsigned long)ts_ms);
-            if (n < 0 || (size_t)n >= results_remain) {
-                break;
-            }
-            results_used += (size_t)n;
-            results_remain = results_buf_size - results_used;
-            results_count++;
+        if (!mon) {
+            snprintf(error_reason, sizeof(error_reason), "%s", id_str);
+            free(results_buf);
+            return ERR_INVALID_ID;
         }
+
+        if (results_count > 0) {
+            if (results_used + 1 < results_buf_size) {
+                results_buf[results_used++] = ',';
+                results_buf[results_used] = '\0';
+                results_remain = results_buf_size - results_used;
+            }
+        }
+        uint32_t ts_ms = HAL_GetTick();
+        float conf = get_confidence(mon);
+        conf = conf * 100;
+        int confident = (int)conf;
+        n = snprintf(results_buf + results_used, results_remain,
+                     "{\"id\":\"%s\",\"state\":\"%s\",\"state_code\":%d,\"confidence\":%d,\"ts_ms\":%lu}\r\n",
+                     mon->id, state_to_str(mon->state), state_to_code(mon->state), confident, (unsigned long)ts_ms);
+        if (n < 0 || (size_t)n >= results_remain) {
+            break;
+        }
+        results_used += (size_t)n;
+        results_remain = results_buf_size - results_used;
+        results_count++;
+
         ids_current++;
     }
     if (results_used + 2 < results_buf_size) {
@@ -817,7 +826,8 @@ json_err_t handle_relay_set(jsmntok_t *tokens, int token_count, char *response, 
     }
 
     if (relay_id_idx == -1 || state_idx == -1) {
-        return ERR_INVALID_CMD;
+        snprintf(error_reason, sizeof(error_reason), "data");
+        return ERR_INVALID_DATA;
     }
 
     char relay_id[32] = {0};
@@ -831,12 +841,14 @@ json_err_t handle_relay_set(jsmntok_t *tokens, int token_count, char *response, 
     } else if (state_len == 5 && strncmp(state_ptr, "false", 5) == 0) {
         relay_on = 0;
     } else {
+        snprintf(error_reason, sizeof(error_reason), "state");
         return ERR_INVALID_DATA;
     }
 
     Button_TypeDef button;
     if (!relay_name_to_button(relay_id, &button)) {
-        return ERR_INVALID_DATA;
+        snprintf(error_reason, sizeof(error_reason), "%s", relay_id);
+        return ERR_INVALID_ID;
     }
 
     Relay_output_TypeDef *ro = relay_output_get(button);
@@ -848,6 +860,7 @@ json_err_t handle_relay_set(jsmntok_t *tokens, int token_count, char *response, 
     int busy = (ro->state == RELAY_PULSE || ro->state == RELAY_GAP || ro->in_seq);
     __enable_irq();
     if (busy) {
+        snprintf(error_reason, sizeof(error_reason), "%s", relay_id);
         return ERR_BUSY;
     }
 
@@ -923,7 +936,8 @@ json_err_t handle_relay_pulse(jsmntok_t *tokens, int token_count, char *response
     }
 
     if (relay_id_idx == -1 || pulse_ms_idx == -1) {
-        return ERR_INVALID_CMD;
+        snprintf(error_reason, sizeof(error_reason), "data");
+        return ERR_INVALID_DATA;
     }
 
     char relay_id[32] = {0};
@@ -940,7 +954,8 @@ json_err_t handle_relay_pulse(jsmntok_t *tokens, int token_count, char *response
 
     Button_TypeDef button;
     if (!relay_name_to_button(relay_id, &button)) {
-        return ERR_INVALID_DATA;
+        snprintf(error_reason, sizeof(error_reason), "%s", relay_id);
+        return ERR_INVALID_ID;
     }
 
     Relay_output_TypeDef *ro = relay_output_get(button);
@@ -952,6 +967,7 @@ json_err_t handle_relay_pulse(jsmntok_t *tokens, int token_count, char *response
     int busy = (ro->state != RELAY_IDLE);
     __enable_irq();
     if (busy) {
+        snprintf(error_reason, sizeof(error_reason), "%s", relay_id);
         return ERR_BUSY;
     }
 
@@ -1023,7 +1039,8 @@ json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *resp
     }
 
     if (relay_id_idx == -1 || sequence_idx == -1) {
-        return ERR_INVALID_CMD;
+        snprintf(error_reason, sizeof(error_reason), "data");
+        return ERR_INVALID_DATA;
     }
 
     char relay_id[32] = {0};
@@ -1031,7 +1048,8 @@ json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *resp
 
     Button_TypeDef button;
     if (!relay_name_to_button(relay_id, &button)) {
-        return ERR_INVALID_DATA;
+        snprintf(error_reason, sizeof(error_reason), "%s", relay_id);
+        return ERR_INVALID_ID;
     }
 
     int seq_count = tokens[sequence_idx].size;
@@ -1094,6 +1112,7 @@ json_err_t handle_relay_pulse_seq(jsmntok_t *tokens, int token_count, char *resp
     int busy = (ro->state != RELAY_IDLE);
     __enable_irq();
     if (busy) {
+        snprintf(error_reason, sizeof(error_reason), "%s", relay_id);
         return ERR_BUSY;
     }
 
