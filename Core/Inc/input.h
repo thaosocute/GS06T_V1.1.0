@@ -4,6 +4,7 @@
 #define EVENTS_HISTORY_MAX 16
 #define INPUT_QUEUE_SIZE 100
 #define SAMPLE_RATE_MS     50
+#define INPUT_PINS_USED 18
 
 #include "json_cmd.h"
 #include "monitors_config.h"
@@ -26,7 +27,7 @@ typedef struct {
     float    confident;
 } PinAnalysis;
 
-void push_input(uint16_t val);
+void push_input(uint32_t val);
 void update_monitor_state(Monitor *monitor);
 PinAnalysis analyze_pin(uint8_t n_samples, uint8_t pin);
 

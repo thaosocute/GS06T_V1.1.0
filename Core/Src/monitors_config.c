@@ -19,7 +19,7 @@ extern I2C_HandleTypeDef hi2c3;
 extern volatile uint32_t tim6_tick_ms;
 
 static inline Input_TypeDef sanitize_input_pin(uint64_t val) {
-    if (val >= 1 && val <= 16) {
+    if (val >= 1 && val <= INPUT_PINS_USED) {
         return (Input_TypeDef)val;
     }
     return 0;  // 0 nghĩa chưa gán/unassigned
@@ -30,7 +30,7 @@ void monitors_set_json(const char *json_str) {
 }
 
 void monitor_set_state_event() {
-    for(uint8_t i = 0; i < 16; i++) {
+    for(uint8_t i = 0; i < INPUT_PINS_USED; i++) {
         update_monitor_state(&monitors_arr[i]);
     }
 }

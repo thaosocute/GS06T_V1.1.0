@@ -4,7 +4,7 @@
 
 monitor_event_t monitors_event[EVENTS_HISTORY_MAX];
 
-uint16_t input_queue[INPUT_QUEUE_SIZE];
+uint32_t input_queue[INPUT_QUEUE_SIZE];
 int queue_head = 0;
 int queue_tail = 0;
 int queue_count = 0;
@@ -32,13 +32,13 @@ static void add_monitor_event(const char *monitor_id, json_monitor_state_t curre
  * i = 1 → trước đó 50ms
  * i = queue_count-1 → cũ nhất
  */
-static inline uint16_t queue_get(int i) {
+static inline uint32_t queue_get(int i) {
     return input_queue[(queue_head - 1 - i + INPUT_QUEUE_SIZE) % INPUT_QUEUE_SIZE];
 }
 
 static inline uint8_t get_pin(int sample_idx, uint8_t pin) {
-    // Input_TypeDef: 1..16, bit position trong queue là 0..15
-    if (pin == 0 || pin > 16) return 0;
+    // Input_TypeDef: 1..32, bit position trong queue là 0..31
+    if (pin == 0 || pin > 32) return 0;
     return (queue_get(sample_idx) >> (pin - 1)) & 1;
 }
 
@@ -142,7 +142,7 @@ static json_monitor_state_t infer_from_analysis(MonitorType type, PinAnalysis *a
     }
     return UNKNOWN;
 }
-void push_input(uint16_t val) {
+void push_input(uint32_t val) {
     input_queue[queue_head] = val;
     queue_head = (queue_head + 1) % INPUT_QUEUE_SIZE;
     if (queue_count < INPUT_QUEUE_SIZE) {

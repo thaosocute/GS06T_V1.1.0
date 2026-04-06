@@ -453,7 +453,7 @@ static void MX_USART3_UART_Init(void)
 
   /* USER CODE END USART3_Init 1 */
   huart3.Instance = USART3;
-  huart3.Init.BaudRate = 9600;
+  huart3.Init.BaudRate = 115200;
   huart3.Init.WordLength = UART_WORDLENGTH_8B;
   huart3.Init.StopBits = UART_STOPBITS_1;
   huart3.Init.Parity = UART_PARITY_NONE;
@@ -506,6 +506,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, LED_STT_Pin|EN1_Pin|EN2_Pin, GPIO_PIN_RESET);
@@ -575,8 +576,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : IN13_Pin IN14_Pin IN15_Pin */
-  GPIO_InitStruct.Pin = IN13_Pin|IN14_Pin|IN15_Pin;
+  /*Configure GPIO pins : IN13_Pin IN14_Pin IN15_Pin IN17_Pin */
+  GPIO_InitStruct.Pin = IN13_Pin|IN14_Pin|IN15_Pin|IN17_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -586,6 +587,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(IN16_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : IN18_Pin */
+  GPIO_InitStruct.Pin = IN18_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(IN18_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : BR_I1_Pin BR_I2_Pin BR_I3_Pin BR_I4_Pin
                            BR_I5_Pin BR_I6_Pin */
@@ -746,7 +753,7 @@ void StartRS485CmdTask(void *argument)
               // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
               HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
               HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
-              memset(response, 0, sizeof(response));
+              // memset(response, 0, sizeof(response));
             } else {
               handle_error(error, seq_num, err_response, sizeof(err_response));
               HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
@@ -853,7 +860,7 @@ void StartUpdate_input(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    uint16_t input_state = 0;
+    uint32_t input_state = 0;
     input_state |= (HAL_GPIO_ReadPin(IN1_GPIO_Port, IN1_Pin) == GPIO_PIN_RESET) ? (1 << 0) : 0;
     input_state |= (HAL_GPIO_ReadPin(IN2_GPIO_Port, IN2_Pin) == GPIO_PIN_RESET) ? (1 << 1) : 0;
     input_state |= (HAL_GPIO_ReadPin(IN3_GPIO_Port, IN3_Pin) == GPIO_PIN_RESET) ? (1 << 2) : 0;
@@ -870,6 +877,8 @@ void StartUpdate_input(void *argument)
     input_state |= (HAL_GPIO_ReadPin(IN14_GPIO_Port, IN14_Pin) == GPIO_PIN_RESET) ? (1 << 13) : 0;
     input_state |= (HAL_GPIO_ReadPin(IN15_GPIO_Port, IN15_Pin) == GPIO_PIN_RESET) ? (1 << 14) : 0;
     input_state |= (HAL_GPIO_ReadPin(IN16_GPIO_Port, IN16_Pin) == GPIO_PIN_RESET) ? (1 << 15) : 0;
+    input_state |= (HAL_GPIO_ReadPin(IN17_GPIO_Port, IN17_Pin) == GPIO_PIN_RESET) ? (1 << 16) : 0;
+    input_state |= (HAL_GPIO_ReadPin(IN18_GPIO_Port, IN18_Pin) == GPIO_PIN_RESET) ? (1 << 17) : 0;
     push_input(input_state);
     count++;
     if(count >= 25){

@@ -105,6 +105,10 @@ void Error_Handler(void);
 #define IN15_GPIO_Port GPIOA
 #define IN16_Pin GPIO_PIN_11
 #define IN16_GPIO_Port GPIOA
+#define IN17_Pin GPIO_PIN_12
+#define IN17_GPIO_Port GPIOA
+#define IN18_Pin GPIO_PIN_2
+#define IN18_GPIO_Port GPIOD
 #define BR_I1_Pin GPIO_PIN_3
 #define BR_I1_GPIO_Port GPIOB
 #define BR_I2_Pin GPIO_PIN_4
