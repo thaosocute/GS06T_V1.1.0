@@ -49,6 +49,7 @@ typedef StaticSemaphore_t osStaticSemaphoreDef_t;
 #define TOKENS_NUM 192
 #define RX_BUFFER_SIZE_MAX 2048
 #define RESPONSE_SIZE_MAX 2048
+#define ERROR_RESPONSE_SIZE_MAX 128
 
 /* USER CODE END PD */
 
@@ -110,8 +111,17 @@ uint16_t rx_index = 0;
 uint16_t timer = 0;
 
 char response[RESPONSE_SIZE_MAX];
+char err_response[ERROR_RESPONSE_SIZE_MAX];
 
-Button_TypeDef button1 = RL1;
+extern char error_reason[32];
+
+volatile uint32_t tim6_tick_ms = 0;
+
+uint16_t count_task = 0;
+uint16_t count_cplt = 0;
+
+
+extern Relay_output_TypeDef relay_output_arr[RELAY_OUTPUT_NUM_MAX];
 
 /* USER CODE END PV */
 
@@ -127,7 +137,7 @@ void StartRS485CmdTask(void *argument);
 void StartUpdate_input(void *argument);
 
 /* USER CODE BEGIN PFP */
-void json_err_handle(json_err_t* err);
+// void json_err_handle(json_err_t* err);
 
 /* USER CODE END PFP */
 
@@ -192,6 +202,9 @@ int main(void)
 
   HAL_GPIO_WritePin(EN1_GPIO_Port, EN1_Pin, GPIO_PIN_SET); 
   HAL_GPIO_WritePin(EN2_GPIO_Port, EN2_Pin, GPIO_PIN_SET);
+
+  set_relay_output_button();
+  HAL_TIM_Base_Start_IT(&htim6);
   
   /* USER CODE END 2 */
 
@@ -369,9 +382,9 @@ static void MX_TIM6_Init(void)
 
   /* USER CODE END TIM6_Init 1 */
   htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 0;
+  htim6.Init.Prescaler = 3;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 65535;
+  htim6.Init.Period = 999;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -440,7 +453,7 @@ static void MX_USART3_UART_Init(void)
 
   /* USER CODE END USART3_Init 1 */
   huart3.Instance = USART3;
-  huart3.Init.BaudRate = 9600;
+  huart3.Init.BaudRate = 115200;
   huart3.Init.WordLength = UART_WORDLENGTH_8B;
   huart3.Init.StopBits = UART_STOPBITS_1;
   huart3.Init.Parity = UART_PARITY_NONE;
@@ -493,6 +506,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, LED_STT_Pin|EN1_Pin|EN2_Pin, GPIO_PIN_RESET);
@@ -562,8 +576,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : IN13_Pin IN14_Pin IN15_Pin */
-  GPIO_InitStruct.Pin = IN13_Pin|IN14_Pin|IN15_Pin;
+  /*Configure GPIO pins : IN13_Pin IN14_Pin IN15_Pin IN17_Pin */
+  GPIO_InitStruct.Pin = IN13_Pin|IN14_Pin|IN15_Pin|IN17_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -573,6 +587,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(IN16_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : IN18_Pin */
+  GPIO_InitStruct.Pin = IN18_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(IN18_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : BR_I1_Pin BR_I2_Pin BR_I3_Pin BR_I4_Pin
                            BR_I5_Pin BR_I6_Pin */
@@ -597,20 +617,25 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 	}
 }
 
-//functions
-void json_err_handle(json_err_t* err){
-  if(*err == ERR_NONE){
-    return;
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM6) {
+    tim6_tick_ms++;
+    relay_output_timer_tick();
   }
-  char err_code[20];
-  strcpy(err_code, json_err_to_code(*err));
-  max3485_transmit(&hmax3485_2, (uint8_t*)err_code, strlen(err_code), HAL_MAX_DELAY);
 }
 
-//void handle_monitors_config();
-//void handle_relay_set();
-//void handle_relay_pulse();
-//void handle_relay_pulse_seq();
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if(huart->Instance == USART3){
+    count_cplt++;
+    HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_RESET);  /* set DE2 low to switch back to receive mode */
+    memset(response, 0, sizeof(response));
+    char debug_buf[64];
+    sprintf(debug_buf, "UART3 ERR: 0x%08lX\r\n", huart->ErrorCode);
+    max3485_transmit(&hmax3485_1, (uint8_t*)debug_buf, strlen(debug_buf), 100);
+  }
+}
 
 /* USER CODE END 4 */
 
@@ -635,12 +660,15 @@ void StartRS485CmdTask(void *argument)
       jsmn_parser parser;
       jsmntok_t tokens[TOKENS_NUM];
       json_err_t error = ERR_NONE;
+      uint32_t seq_num = 0;
       char cmd[32];
       jsmn_init(&parser);
       ret = jsmn_parse(&parser, (const char *)rx_buffer, strlen((const char *)rx_buffer), tokens, TOKENS_NUM);
       if(ret < 0){
         error = ERR_JSON_PARSE;
+        snprintf(error_reason, sizeof(error_reason), "parse");
       } else {
+        seq_num = find_seq_number(tokens, ret);
         for(uint8_t i = 1; i < ret; i++) {
           if(tokens[i].type == JSMN_STRING){
             // kiểm tra nếu token là "cmd"
@@ -654,15 +682,25 @@ void StartRS485CmdTask(void *argument)
         json_cmd_t num;
         num = json_cmd_from_str(cmd);
         switch(num) {
-          case CMD_UNKNOWN:
+          default:
             error = ERR_INVALID_CMD;
+            snprintf(error_reason, sizeof(error_reason), "%s", cmd[0] ? cmd : "unknown");
+            handle_error(error, seq_num, err_response, sizeof(err_response));
+            HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+            HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             break;
           case CMD_MONITOR_CONFIG: {
             monitors_set_json((const char*)rx_buffer);
             error = handle_monitors_config(tokens, ret, response, sizeof(response));
             if (error == ERR_NONE) {
-              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
-              memset(response, 0, sizeof(response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
+              // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
+              // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           }
@@ -670,56 +708,135 @@ void StartRS485CmdTask(void *argument)
             monitors_set_json((const char*)rx_buffer);
             error = handle_read_pattern(tokens, ret, response, sizeof(response));
             if(error == ERR_NONE) {
-              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
-              memset(response, 0, sizeof(response));
-              release_button(&hi2c3, button1);
+              // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
+              // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_READ_SNAPSHOT:
             monitors_set_json((const char*)rx_buffer);
             error = handle_read_snapshot(tokens, ret, response, sizeof(response));
             if(error == ERR_NONE) {
-              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
-              memset(response, 0, sizeof(response));
+              // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
+              // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_POLL:
             monitors_set_json((const char*)rx_buffer);
             error = handle_poll(tokens, ret, response, sizeof(response));
             if(error == ERR_NONE) {
-              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
-              memset(response, 0, sizeof(response));
+              // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
+              // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_FLUSH_EVENTS:
             monitors_set_json((const char*)rx_buffer);
             error = handle_flush_events(tokens, ret, response, sizeof(response));
             if(error == ERR_NONE) {
-              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
-              memset(response, 0, sizeof(response));
+              // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
+              // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_PING:
             monitors_set_json((const char*)rx_buffer);
             error = handle_ping(tokens, ret, response, sizeof(response));
             if(error == ERR_NONE) {
-              max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), HAL_MAX_DELAY);
-              memset(response, 0, sizeof(response));
-              press_button(&hi2c3, button1);
+              // char debug_buf[64];
+              // HAL_StatusTypeDef status;
+              // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
+              // memset(response, 0, sizeof(response));
+              // sprintf(debug_buf, "TX status: %d, gState: %ld, err: %lu\r\n", status, huart3.gState, huart3.ErrorCode);
+              // max3485_transmit(&hmax3485_1, (uint8_t*)debug_buf, strlen(debug_buf), HAL_MAX_DELAY);
+              // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
             }
             break;
           case CMD_RELAY_SET:
+            monitors_set_json((const char*)rx_buffer);
+            error = handle_relay_set(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
+              // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
+            }
             break;
           case CMD_RELAY_PULSE:
+            monitors_set_json((const char*)rx_buffer);  
+          error = handle_relay_pulse(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
+              // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
+            }
             break;
           case CMD_RELAY_PULSE_SEQ:
+            monitors_set_json((const char*)rx_buffer);  
+            error = handle_relay_pulse_seq(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
+              // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
+            }
             break;
           case CMD_RESET:
+            monitors_set_json((const char*)rx_buffer);  
+            error = handle_reset(tokens, ret, response, sizeof(response));
+            if(error == ERR_NONE) {
+              // max3485_transmit(&hmax3485_2, (uint8_t*)response, strlen(response), 1000);
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)response, strlen(response));
+              // memset(response, 0, sizeof(response));
+            } else {
+              handle_error(error, seq_num, err_response, sizeof(err_response));
+              HAL_GPIO_WritePin(RS485_DE2_GPIO_Port, RS485_DE2_Pin, GPIO_PIN_SET);
+              HAL_UART_Transmit_DMA(&huart3, (uint8_t*)err_response, strlen(err_response));
+            }
             break;
         }
       }
-      json_err_handle(&error);
-      error = ERR_NONE;
       memset(rx_buffer, 0, RX_BUFFER_SIZE_MAX);
       rx_index = 0;
       HAL_UARTEx_ReceiveToIdle_DMA(&huart3, rx_buffer, RX_BUFFER_SIZE_MAX);
@@ -743,7 +860,7 @@ void StartUpdate_input(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    uint16_t input_state = 0;
+    uint32_t input_state = 0;
     input_state |= (HAL_GPIO_ReadPin(IN1_GPIO_Port, IN1_Pin) == GPIO_PIN_RESET) ? (1 << 0) : 0;
     input_state |= (HAL_GPIO_ReadPin(IN2_GPIO_Port, IN2_Pin) == GPIO_PIN_RESET) ? (1 << 1) : 0;
     input_state |= (HAL_GPIO_ReadPin(IN3_GPIO_Port, IN3_Pin) == GPIO_PIN_RESET) ? (1 << 2) : 0;
@@ -760,6 +877,8 @@ void StartUpdate_input(void *argument)
     input_state |= (HAL_GPIO_ReadPin(IN14_GPIO_Port, IN14_Pin) == GPIO_PIN_RESET) ? (1 << 13) : 0;
     input_state |= (HAL_GPIO_ReadPin(IN15_GPIO_Port, IN15_Pin) == GPIO_PIN_RESET) ? (1 << 14) : 0;
     input_state |= (HAL_GPIO_ReadPin(IN16_GPIO_Port, IN16_Pin) == GPIO_PIN_RESET) ? (1 << 15) : 0;
+    input_state |= (HAL_GPIO_ReadPin(IN17_GPIO_Port, IN17_Pin) == GPIO_PIN_RESET) ? (1 << 16) : 0;
+    input_state |= (HAL_GPIO_ReadPin(IN18_GPIO_Port, IN18_Pin) == GPIO_PIN_RESET) ? (1 << 17) : 0;
     push_input(input_state);
     count++;
     if(count >= 25){
@@ -767,7 +886,7 @@ void StartUpdate_input(void *argument)
       monitor_set_state_event();
       HAL_GPIO_TogglePin(LED_STT_GPIO_Port, LED_STT_Pin);
     } 
-    osDelay(50);  // �?�?c mỗi 100ms, có thể đi�?u chỉnh
+    osDelay(SAMPLE_RATE_MS);  // �?�?c mỗi 100ms, có thể đi�?u chỉnh
   }
   /* USER CODE END StartUpdate_input */
 }

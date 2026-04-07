@@ -76,6 +76,7 @@ const char* state_to_str(json_monitor_state_t state) {
         case BLINK_ORANGE_5HZ: return "blink_orange_5hz";
         case BLINK_PURPLE_1HZ: return "blink_purple_1hz";
         case BLINK_PURPLE_5HZ: return "blink_purple_5hz";
+        case BLINK_GREEN_1HZ: return "blink_green_1hz";
         case BEEP_ONCE: return "beep_once";
         case BEEP_ONCE_EXIT: return "beep_once_exit";
         case BEEP_1_PER_5S: return "beep_1_per_5s";
