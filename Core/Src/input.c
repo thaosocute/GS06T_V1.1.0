@@ -131,6 +131,8 @@ static json_monitor_state_t infer_from_analysis(MonitorType type, PinAnalysis *a
         } else if (a->duty_cycle > 0.45f && a->duty_cycle < 0.6f) {
             a->confident = abs((a->duty_cycle - 0.5f)/0.05);
             return BEEP_1_PER_0S5_8S;
+        } else if (a->duty_cycle > 0.2f && a->duty_cycle <=0.45f) {
+            return BEEP_3_PER_1S5;
         } else if (a->duty_cycle <= 0.01f) {
             a->confident = 0.99f;
             return OFF;
